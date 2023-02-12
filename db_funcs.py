@@ -48,9 +48,9 @@ def insert_values(id,value,table_name):
 
 
        
-create_table_sql = """ CREATE TABLE IF NOT EXISTS test (
+create_table_sql = """ CREATE TABLE IF NOT EXISTS pdi_liquidities (
 id INTEGER NULL PRIMARY KEY AUTOINCREMENT
 );
 """
 
-insert_values("Uniswap",0.03,"test")
+insert_values("Uniswap",0.03,"pdi_liquidities")
