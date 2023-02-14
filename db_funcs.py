@@ -1,12 +1,12 @@
 import sqlite3
 
-db = "asset_liquidities.sqlite"
+db = "../asset_liquidities.sqlite" if __name__ != "__main__" else "asset_liquidities.sqlite"
 
 def create_connection(db_file):
     conn = None
 
     try:
-        conn = sqlite3.connect(db_file)
+        conn = sqlite3.connect(db_file,isolation_level=None)
     except Exception as e:
         print(e)
     return conn
@@ -20,37 +20,34 @@ def create_table(statement):
     except Exception as e:
         print(e)
 
-def add_column(id,table_name):
+def add_column(column,table_name):
     conn =  create_connection(db).cursor()
-    statement = f"ALTER TABLE {table_name} ADD {id} DOUBLE PRECISION"
+    statement = f"ALTER TABLE {table_name} ADD \"{column}\" DOUBLE PRECISION"
     conn.execute(statement)
 
-def drop_column(id,table_name):
+def drop_column(column,table_name):
     conn =  create_connection(db).cursor()
-    statement = f"ALTER TABLE {table_name} DROP COLUMN {id} "
+    statement = f"ALTER TABLE {table_name} DROP COLUMN {column} "
     conn.execute(statement)
 
-def does_column_exist(id,table_name):
+def does_column_exist(column,table_name):
     conn =  create_connection(db).cursor()
-    statement = f"SELECT length({id}) FROM {table_name}"
+    statement = f"SELECT length(\"{column}\") FROM {table_name}"
+    print(statement)
     try:
         conn.execute(statement)
         return True
     except:
-        add_column(id,table_name)
+        add_column(column,table_name)
         return True
         
-def insert_values(id,value,table_name):
+def insert_values(row,columns,values,table_name):
+    for column in columns:
+        does_column_exist(column,table_name)
     conn =  create_connection(db).cursor()
-    statement = f"INSERT INTO {table_name}(id,{id}) VALUES(1,{value});"
+    columns = ",".join(columns)
+    values = str(values).strip('[]').replace(' ','')
+    statement = f"""
+    REPLACE INTO {table_name}(date,\"{columns}\")
+    VALUES('{row}',{values});"""
     conn.execute(statement)
-    
-
-
-       
-create_table_sql = """ CREATE TABLE IF NOT EXISTS pdi_liquidities (
-id INTEGER NULL PRIMARY KEY AUTOINCREMENT
-);
-"""
-
-insert_values("Uniswap",0.03,"pdi_liquidities")
