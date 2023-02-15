@@ -1,6 +1,6 @@
 import sqlite3
 
-db = "../asset_liquidities.sqlite" if __name__ != "__main__" else "asset_liquidities.sqlite"
+db = "../rebalancing_data_db.sqlite" if __name__ != "__main__" else "rebalancing_data_db.sqlite"
 
 def create_connection(db_file):
     conn = None
@@ -50,3 +50,27 @@ def insert_values(row,columns,values,table_name):
     REPLACE INTO {table_name}(date,{columns})
     VALUES("{row}",{values})"""
     conn.execute(statement)
+
+# Helper functions
+def convert_to_sql_strings(string_list):
+    num_list = ['zero','one','two','three','four','five','six','seven','eight','nine']
+    converted_strings = []
+    for i in string_list:
+        if '-' in i:
+            i = i.replace('-','_')
+        if i == '1inch':
+            i = 'one_inch'
+        converted_strings.append(i)
+    return converted_strings
+
+def convert_from_sql_strings(string_list):
+    num_list = ['zero','one','two','three','four','five','six','seven','eight','nine']
+    converted_strings = []
+    for i in string_list:
+        if '_' in i:
+            i = i.replace('_','-')
+        if i == 'one-inch':
+            i = '1inch'
+        converted_strings.append(i)
+    return converted_strings
+
