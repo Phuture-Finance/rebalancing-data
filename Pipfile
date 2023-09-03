@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+pandas = "*"
+pycoingecko = "*"
+numpy = "*"
+python-decouple = "*"
+web3 = "*"
+matplotlib = "*"
+plotly = "*"
+defillama = "*"
+nbformat = "*"
+
+[dev-packages]
+ipykernel = "*"
+
+[requires]
+python_version = "3.6"
