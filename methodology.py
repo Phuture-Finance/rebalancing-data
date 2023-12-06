@@ -22,7 +22,6 @@ class Methodology:
         liveness_threshold,
         liquidity_consistency,
         max_slippage,
-        df_to_remove,
         cg_category=None,
     ):
         self.min_mcap = min_mcap
@@ -39,7 +38,6 @@ class Methodology:
         self.weights = None
         self.weights_converted = None
         self.slippage_data = None
-        self.df_to_remove = df_to_remove
         self.blockchains = {
             "ethereum": "ethereum",
             "avalanche": "avalanche-2",
@@ -167,10 +165,11 @@ class Methodology:
         self.all_coin_data.set_index("id", inplace=True)
         return self.all_coin_data
 
-    def filter_and_merge_coin_data(self):
+    def filter_and_merge_coin_data(self, df_to_remove=None):
         self.all_coin_data.query("index in @self.category_data.index", inplace=True)
-        for df in self.df_to_remove:
-            self.all_coin_data.drop(df.index, inplace=True, errors="ignore")
+        if df_to_remove:
+            for df in self.df_to_remove:
+                self.all_coin_data.drop(df.index, inplace=True, errors="ignore")
         for id, data in self.all_coin_data.iterrows():
             platforms = list(data["platforms"].keys())
             to_remove = True
@@ -434,14 +433,22 @@ class Methodology:
         results = results.sort_values("market_cap", ascending=False)
         return results
 
-    def main(self, add_category_assets=None, ids_to_replace=None):
+    def main(
+        self,
+        df_to_remove=None,
+        add_category_assets=None,
+        ids_to_replace=None,
+        manual_exclusions=None,
+    ):
         self.get_category_data()
         if add_category_assets:
             self.add_assets_to_category(add_category_assets)
         if ids_to_replace:
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
+        if manual_exclusions:
+            self.remove_manual_exclusions(manual_exclusions)
         self.get_all_coin_data()
-        self.filter_and_merge_coin_data()
+        self.filter_and_merge_coin_data(df_to_remove)
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity()
