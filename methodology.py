@@ -137,7 +137,7 @@ class Methodology:
         ]
         return self.category_data
 
-    def add_asset_to_category(self, ids):
+    def add_assets_to_category(self, ids):
         coin_data = pd.DataFrame(cg.get_coins_markets("usd", ids=ids))
         coin_data.set_index("id", inplace=True)
         coin_data = coin_data[
@@ -157,7 +157,7 @@ class Methodology:
         self.category_data.sort_values(by=["market_cap"], inplace=True, ascending=False)
         return self.category_data
 
-    def replace_id(self, ids, replacement_ids):
+    def replace_ids(self, ids, replacement_ids):
         for i in range(len(ids)):
             self.category_data.rename(index={ids[i]: replacement_ids[i]}, inplace=True)
         return self.category_data
@@ -356,13 +356,16 @@ class Methodology:
             "https://api.redstone.finance/prices?provider=redstone&symbols="
         )
         symbols = list(self.category_data["symbol"].str.upper())
+        print(symbols)
         for s in symbols:
             if s == symbols[-1]:
                 redstone_base_url += f"{s}"
             else:
                 redstone_base_url += f"{s},"
+        print(redstone_base_url)
         symbol_zip = list(zip(self.category_data.index, symbols))
         request = requests.get(redstone_base_url).json()
+        print(request)
         for id, symbol in symbol_zip:
             try:
                 request[symbol]["value"]
@@ -371,62 +374,78 @@ class Methodology:
                 self.category_data.drop(id, inplace=True)
         return self.category_data
 
+    def sync_mcap_dataframe(self):
+        self.mcap_data = self.mcap_data[self.category_data.index]
+        return self.mcap_data
+
     def calculate_weights(self):
-        if self.max_weight < 1 / len(self.category_data):
+        self.sync_mcap_dataframe()
+        if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
         self.weights = self.mcap_data.div(self.mcap_data.sum(axis=1), axis=0)
         while (self.weights > self.max_weight).any(axis=None):
             self.weights[self.weights > self.max_weight] = self.max_weight
             remainder = 1 - self.weights.sum(axis=1)
+            if float(remainder.iloc[0]) == float(0):
+                break
             smaller_weights = self.weights[self.weights < self.max_weight]
-            self.weights[self.weights < self.max_weight] += smaller_weights.div(
-                smaller_weights.sum(axis=1), axis=0
-            ).mul(remainder)
-        tiny_weights = (self.weights[self.weights] > self.min_weight)
-        print(tiny_weights)
-        self.weights = self.weights[tiny_weights]
-        self.weights.columns
+            self.weights += smaller_weights.div(
+                float(smaller_weights.sum(axis=1).iloc[0]), fill_value=0, axis=0
+            ).mul(float(remainder.iloc[0]), axis=1)
+        acceptable_weights = self.weights > self.min_weight
+        self.weights = self.weights[acceptable_weights]
         self.weights = self.weights.div(self.weights.sum(axis=1), axis=0)
-
         self.category_data.query("index in @self.weights.columns", inplace=True)
-        self.mcap_data = self.mcap_data[self.category_data.index]
-
+        self.sync_mcap_dataframe()
         return self.weights
 
     def converted_weights(self):
         w_scaled = self.weights * 255
         w_res = np.floor(w_scaled).astype(int)
         remainders = w_scaled - w_res
-        k = round(remainders.sum())
+        k = float(round(remainders.sum(axis=1)).iloc[0])
         while k > 0:
-            for i in range(len(w_res)):
+            for i in w_res.columns:
                 if k > 0:
                     w_res[i] += 1
                     k -= 1
                 else:
                     break
-        self.weights_converted = w_res
-        return w_res
+        self.weights_converted = w_res.iloc[0]
+        return self.weights_converted
 
     def show_results(self):
         results = pd.DataFrame()
         results.index = self.category_data.index
-        result["name"] = self.category_data["name"]
-        result["market_cap"] = self.mcap_data
-        result["weight"] = self.weights
-        result["weight_converted"] = self.weights_converted
-        result["address"] = [
+        results["name"] = self.category_data["name"]
+        results["market_cap"] = self.category_data["market_cap"]
+        results["weight"] = self.weights.iloc[0]
+        results["weight_converted"] = self.weights_converted
+        results["address"] = [
             data["platforms"][self.slippage_data.at[id, "blockchain"]]
             if self.slippage_data.at[id, "blockchain"] in data["platforms"].keys()
             else data["symbol"].upper()
             for id, data in self.category_data.iterrows()
         ]
-        result["blockchain_with_highest_liq"] = [
+        results["blockchain_with_highest_liq"] = [
             self.slippage_data.at[id, "blockchain"]
             for id, data in self.category_data.iterrows()
         ]
-        result = result.sort_values("market_cap", ascending=False)
-        return result
-    
-    def show(self):
-        print("hello")
+        results = results.sort_values("market_cap", ascending=False)
+        return results
+
+    def main(self, add_category_assets=None, ids_to_replace=None):
+        self.get_category_data()
+        if add_category_assets:
+            self.add_assets_to_category(add_category_assets)
+        if ids_to_replace:
+            self.replace_ids(ids_to_replace[0], ids_to_replace[1])
+        self.get_all_coin_data()
+        self.filter_and_merge_coin_data()
+        self.token_supply_check()
+        self.asset_maturity_check()
+        self.assess_liquidity()
+        self.check_redstone_price_feeds()
+        self.calculate_weights()
+        self.converted_weights()
+        return self.show_results()
