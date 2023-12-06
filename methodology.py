@@ -168,7 +168,7 @@ class Methodology:
     def filter_and_merge_coin_data(self, df_to_remove=None):
         self.all_coin_data.query("index in @self.category_data.index", inplace=True)
         if df_to_remove:
-            for df in self.df_to_remove:
+            for df in df_to_remove:
                 self.all_coin_data.drop(df.index, inplace=True, errors="ignore")
         for id, data in self.all_coin_data.iterrows():
             platforms = list(data["platforms"].keys())
@@ -355,16 +355,13 @@ class Methodology:
             "https://api.redstone.finance/prices?provider=redstone&symbols="
         )
         symbols = list(self.category_data["symbol"].str.upper())
-        print(symbols)
         for s in symbols:
             if s == symbols[-1]:
                 redstone_base_url += f"{s}"
             else:
                 redstone_base_url += f"{s},"
-        print(redstone_base_url)
         symbol_zip = list(zip(self.category_data.index, symbols))
         request = requests.get(redstone_base_url).json()
-        print(request)
         for id, symbol in symbol_zip:
             try:
                 request[symbol]["value"]
@@ -393,6 +390,7 @@ class Methodology:
             ).mul(float(remainder.iloc[0]), axis=1)
         acceptable_weights = self.weights > self.min_weight
         self.weights = self.weights[acceptable_weights]
+        self.weights.dropna(inplace=True,axis=1)
         self.weights = self.weights.div(self.weights.sum(axis=1), axis=0)
         self.category_data.query("index in @self.weights.columns", inplace=True)
         self.sync_mcap_dataframe()
@@ -455,4 +453,4 @@ class Methodology:
         self.check_redstone_price_feeds()
         self.calculate_weights()
         self.converted_weights()
-        return self.show_results()
+        return (self.show_results(),self.slippage_data)
