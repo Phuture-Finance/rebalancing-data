@@ -18,6 +18,7 @@ class Methodology:
         min_mcap,
         min_weight,
         max_weight,
+        int_range_for_weight,
         circ_supply_threshold,
         liveness_threshold,
         liquidity_consistency,
@@ -32,6 +33,7 @@ class Methodology:
         self.liquidity_consistency = liquidity_consistency
         self.max_slippage = max_slippage
         self.cg_category = cg_category
+        self.int_range_for_weight = int_range_for_weight
         self.category_data = None
         self.all_coin_data = None
         self.mcap_data = None
@@ -154,6 +156,9 @@ class Methodology:
         self.category_data = pd.concat([self.category_data, coin_data])
         self.category_data.sort_values(by=["market_cap"], inplace=True, ascending=False)
         return self.category_data
+    
+    def remove_assets_from_category(self,ids):
+            self.category_data.drop(ids,inplace=True)
 
     def replace_ids(self, ids, replacement_ids):
         for i in range(len(ids)):
@@ -195,7 +200,6 @@ class Methodology:
         return self.category_data
 
     def asset_maturity_check(self):
-        marketcaps = pd.DataFrame()
         for id, _ in self.category_data.iterrows():
             cg_data = cg.get_coin_market_chart_by_id(id, vs_currency="USD", days="max")
             df_prices = pd.DataFrame(cg_data["prices"], columns=["date", id])
@@ -222,9 +226,6 @@ class Methodology:
                     print(
                         f"Note: {id}, marketcap data available only for {len(df_mcaps)} < {self.liveness_threshold} days"
                     )
-                df_mcaps = df_mcaps.reindex(df_prices.index)
-                marketcaps = pd.concat([marketcaps, df_mcaps], axis=1)
-        self.mcap_data = marketcaps.tail(1)
         return self.category_data
 
     def remove_manual_exclusions(self, exclusion_list):
@@ -245,7 +246,7 @@ class Methodology:
                 * 10**decimals,
                 "enableSlippageProtection": "true",
             }
-            time.sleep(1)
+            #time.sleep(1)
             # spot price is calculated as a price for 100$ swap
             resp = requests.get(
                 self.url_0x[blockchain], params=query, headers=self.header
@@ -257,7 +258,7 @@ class Methodology:
                 int(1e5 / cg.get_price(sell_token_id, "usd")[sell_token_id]["usd"])
                 * 10**decimals
             )
-            time.sleep(1)
+            #time.sleep(1)
             resp = requests.get(
                 self.url_0x[blockchain], params=query, headers=self.header
             )
@@ -370,45 +371,47 @@ class Methodology:
                 self.category_data.drop(id, inplace=True)
         return self.category_data
 
-    def sync_mcap_dataframe(self):
-        self.mcap_data = self.mcap_data[self.category_data.index]
+    def set_mcap_data(self):
+        self.mcap_data = self.category_data['market_cap']
         return self.mcap_data
-
+    
     def calculate_weights(self):
-        self.sync_mcap_dataframe()
+        self.set_mcap_data()
         if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
-        self.weights = self.mcap_data.div(self.mcap_data.sum(axis=1), axis=0)
+        self.weights = self.mcap_data.div(self.mcap_data.sum())
         while (self.weights > self.max_weight).any(axis=None):
             self.weights[self.weights > self.max_weight] = self.max_weight
-            remainder = 1 - self.weights.sum(axis=1)
-            if float(remainder.iloc[0]) == float(0):
+            remainder = 1 - self.weights.sum()
+            if remainder == float(0):
                 break
             smaller_weights = self.weights[self.weights < self.max_weight]
-            self.weights += smaller_weights.div(
-                float(smaller_weights.sum(axis=1).iloc[0]), fill_value=0, axis=0
-            ).mul(float(remainder.iloc[0]), axis=1)
+            self.weights = self.weights.add(smaller_weights.div(
+                smaller_weights.sum()
+            ).mul(remainder),fill_value=0)
         acceptable_weights = self.weights > self.min_weight
         self.weights = self.weights[acceptable_weights]
-        self.weights.dropna(inplace=True,axis=1)
-        self.weights = self.weights.div(self.weights.sum(axis=1), axis=0)
-        self.category_data.query("index in @self.weights.columns", inplace=True)
-        self.sync_mcap_dataframe()
+        self.weights = self.weights.div(self.weights.sum())
+        self.weights.sort_values(inplace=True,ascending=False)
+        self.category_data.query("index in @self.weights.index", inplace=True)
+        self.set_mcap_data()
         return self.weights
 
     def converted_weights(self):
-        w_scaled = self.weights * 255
+        w_scaled = self.weights * self.int_range_for_weight
         w_res = np.floor(w_scaled).astype(int)
         remainders = w_scaled - w_res
-        k = float(round(remainders.sum(axis=1)).iloc[0])
+        k = round(remainders.sum())
         while k > 0:
-            for i in w_res.columns:
+            for i in w_res.index:
                 if k > 0:
                     w_res[i] += 1
                     k -= 1
                 else:
                     break
-        self.weights_converted = w_res.iloc[0]
+        self.weights_converted = w_res
+        self.weights_converted.sort_values(inplace=True,ascending=False)
+        assert self.weights_converted.sum() == self.int_range_for_weight,"Sum of converted weights does equal max int value"
         return self.weights_converted
 
     def show_results(self):
@@ -416,7 +419,7 @@ class Methodology:
         results.index = self.category_data.index
         results["name"] = self.category_data["name"]
         results["market_cap"] = self.category_data["market_cap"]
-        results["weight"] = self.weights.iloc[0]
+        results["weight"] = self.weights
         results["weight_converted"] = self.weights_converted
         results["address"] = [
             data["platforms"][self.slippage_data.at[id, "blockchain"]]
@@ -435,10 +438,13 @@ class Methodology:
         self,
         df_to_remove=None,
         add_category_assets=None,
+        remove_category_assets=None,
         ids_to_replace=None,
         manual_exclusions=None,
     ):
         self.get_category_data()
+        if remove_category_assets:
+            self.remove_assets_from_category(remove_category_assets)
         if add_category_assets:
             self.add_assets_to_category(add_category_assets)
         if ids_to_replace:
