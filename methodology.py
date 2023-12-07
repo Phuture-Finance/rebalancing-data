@@ -12,13 +12,13 @@ key = decouple.config("CG_KEY")
 cg = CoinGeckoAPI(api_key=key)
 
 
-class Methodology:
+class MethodologyBase:
     def __init__(
         self,
         min_mcap,
         min_weight,
         max_weight,
-        int_range_for_weight,
+        max_int_for_weight,
         circ_supply_threshold,
         liveness_threshold,
         liquidity_consistency,
@@ -33,7 +33,7 @@ class Methodology:
         self.liquidity_consistency = liquidity_consistency
         self.max_slippage = max_slippage
         self.cg_category = cg_category
-        self.int_range_for_weight = int_range_for_weight
+        self.max_int_for_weight = max_int_for_weight
         self.category_data = None
         self.all_coin_data = None
         self.mcap_data = None
@@ -156,9 +156,9 @@ class Methodology:
         self.category_data = pd.concat([self.category_data, coin_data])
         self.category_data.sort_values(by=["market_cap"], inplace=True, ascending=False)
         return self.category_data
-    
-    def remove_assets_from_category(self,ids):
-            self.category_data.drop(ids,inplace=True)
+
+    def remove_assets_from_category(self, ids):
+        self.category_data.drop(ids, inplace=True, errors="ignore")
 
     def replace_ids(self, ids, replacement_ids):
         for i in range(len(ids)):
@@ -170,21 +170,31 @@ class Methodology:
         self.all_coin_data.set_index("id", inplace=True)
         return self.all_coin_data
 
-    def filter_and_merge_coin_data(self, df_to_remove=None):
+    def filter_and_merge_coin_data(self, single_chain=None, df_to_remove=None):
         self.all_coin_data.query("index in @self.category_data.index", inplace=True)
         if df_to_remove:
             for df in df_to_remove:
                 self.all_coin_data.drop(df.index, inplace=True, errors="ignore")
         for id, data in self.all_coin_data.iterrows():
-            platforms = list(data["platforms"].keys())
             to_remove = True
-            for blockchain in platforms:
-                if blockchain in self.blockchains.keys():
+            if single_chain:
+                if single_chain in list(data["platforms"].keys()):
                     to_remove = False
-            if id in self.blockchains.values():
-                to_remove = False
-            if to_remove == True:
-                self.all_coin_data.drop(id, inplace=True)
+                    self.all_coin_data.at[id, "platforms"] = {
+                        single_chain: data["platforms"][single_chain]
+                    }
+                if self.get_blockchain_by_native_asset(id) == single_chain:
+                    to_remove = False
+                if to_remove == True:
+                    self.all_coin_data.drop(id, inplace=True)
+            else:
+                for blockchain in list(data["platforms"].keys()):
+                    if blockchain in self.blockchains.keys():
+                        to_remove = False
+                if id in self.blockchains.values():
+                    to_remove = False
+                if to_remove == True:
+                    self.all_coin_data.drop(id, inplace=True)
         self.category_data = self.category_data.join(
             self.all_coin_data["platforms"], how="inner", on="id"
         )
@@ -246,7 +256,7 @@ class Methodology:
                 * 10**decimals,
                 "enableSlippageProtection": "true",
             }
-            #time.sleep(1)
+            time.sleep(0.2)
             # spot price is calculated as a price for 100$ swap
             resp = requests.get(
                 self.url_0x[blockchain], params=query, headers=self.header
@@ -258,7 +268,7 @@ class Methodology:
                 int(1e5 / cg.get_price(sell_token_id, "usd")[sell_token_id]["usd"])
                 * 10**decimals
             )
-            #time.sleep(1)
+            time.sleep(0.2)
             resp = requests.get(
                 self.url_0x[blockchain], params=query, headers=self.header
             )
@@ -275,7 +285,7 @@ class Methodology:
             }
 
         except KeyError:
-            print(buy_token)
+            print(buy_token, blockchain)
             return None
 
     def get_blockchain_by_native_asset(self, coin_id):
@@ -345,8 +355,8 @@ class Methodology:
             .set_index("id")
             .sort_values(by=["slippage"], ascending=False)
         )
-        self.category_data.drop(
-            slippage_pd[slippage_pd["slippage"] < self.max_slippage].index, inplace=True
+        self.category_data = self.category_data.filter(
+            slippage_pd[slippage_pd["slippage"] > self.max_slippage].index, axis=0
         )
         self.slippage_data = slippage_pd
         return (self.category_data, self.slippage_data)
@@ -372,9 +382,9 @@ class Methodology:
         return self.category_data
 
     def set_mcap_data(self):
-        self.mcap_data = self.category_data['market_cap']
+        self.mcap_data = self.category_data["market_cap"]
         return self.mcap_data
-    
+
     def calculate_weights(self):
         self.set_mcap_data()
         if self.max_weight < (1 / len(self.category_data)):
@@ -386,19 +396,19 @@ class Methodology:
             if remainder == float(0):
                 break
             smaller_weights = self.weights[self.weights < self.max_weight]
-            self.weights = self.weights.add(smaller_weights.div(
-                smaller_weights.sum()
-            ).mul(remainder),fill_value=0)
+            self.weights = self.weights.add(
+                smaller_weights.div(smaller_weights.sum()).mul(remainder), fill_value=0
+            )
         acceptable_weights = self.weights > self.min_weight
         self.weights = self.weights[acceptable_weights]
         self.weights = self.weights.div(self.weights.sum())
-        self.weights.sort_values(inplace=True,ascending=False)
+        self.weights.sort_values(inplace=True, ascending=False)
         self.category_data.query("index in @self.weights.index", inplace=True)
         self.set_mcap_data()
         return self.weights
 
     def converted_weights(self):
-        w_scaled = self.weights * self.int_range_for_weight
+        w_scaled = self.weights * self.max_int_for_weight
         w_res = np.floor(w_scaled).astype(int)
         remainders = w_scaled - w_res
         k = round(remainders.sum())
@@ -410,8 +420,10 @@ class Methodology:
                 else:
                     break
         self.weights_converted = w_res
-        self.weights_converted.sort_values(inplace=True,ascending=False)
-        assert self.weights_converted.sum() == self.int_range_for_weight,"Sum of converted weights does equal max int value"
+        self.weights_converted.sort_values(inplace=True, ascending=False)
+        assert (
+            self.weights_converted.sum() == self.max_int_for_weight
+        ), "Sum of converted weights does equal max int value"
         return self.weights_converted
 
     def show_results(self):
@@ -436,6 +448,7 @@ class Methodology:
 
     def main(
         self,
+        single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
         remove_category_assets=None,
@@ -452,11 +465,11 @@ class Methodology:
         if manual_exclusions:
             self.remove_manual_exclusions(manual_exclusions)
         self.get_all_coin_data()
-        self.filter_and_merge_coin_data(df_to_remove)
+        self.filter_and_merge_coin_data(single_chain, df_to_remove)
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity()
         self.check_redstone_price_feeds()
         self.calculate_weights()
         self.converted_weights()
-        return (self.show_results(),self.slippage_data)
+        return (self.show_results(), self.slippage_data)
