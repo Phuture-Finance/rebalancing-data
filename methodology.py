@@ -238,11 +238,6 @@ class MethodologyBase:
                     )
         return self.category_data
 
-    def remove_manual_exclusions(self, exclusion_list):
-        for id in exclusion_list:
-            self.category_data.drop(id, inplace=True)
-        return self.category_data
-
     def calculate_slippage(self, buy_token, blockchain):
         decimals = self.stablecoin_by_blockchain_info[blockchain]["decimals"]
         sell_token_id = "usd-coin"
@@ -453,7 +448,6 @@ class MethodologyBase:
         add_category_assets=None,
         remove_category_assets=None,
         ids_to_replace=None,
-        manual_exclusions=None,
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -462,8 +456,6 @@ class MethodologyBase:
             self.add_assets_to_category(add_category_assets)
         if ids_to_replace:
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
-        if manual_exclusions:
-            self.remove_manual_exclusions(manual_exclusions)
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
         self.token_supply_check()
@@ -473,3 +465,51 @@ class MethodologyBase:
         self.calculate_weights()
         self.converted_weights()
         return (self.show_results(), self.slippage_data)
+
+
+class MethodologyProd(MethodologyBase):
+    def __init__(
+        self,
+        index_homechain,
+        index_address,
+        min_mcap,
+        min_weight,
+        max_weight,
+        max_int_for_weight,
+        circ_supply_threshold,
+        liveness_threshold,
+        liquidity_consistency,
+        max_slippage,
+        cg_category=None,
+    ):
+        super().__init__(
+            min_mcap,
+            min_weight,
+            max_weight,
+            max_int_for_weight,
+            circ_supply_threshold,
+            liveness_threshold,
+            liquidity_consistency,
+            max_slippage,
+            cg_category,
+        )
+        self.index_address = index_address
+        self.index_homechain = index_homechain
+
+    def main(
+        self,
+        single_chain=None,
+        df_to_remove=None,
+        add_category_assets=None,
+        remove_category_assets=None,
+        ids_to_replace=None,
+    ):
+        super().main(
+            single_chain,
+            df_to_remove,
+            add_category_assets,
+            remove_category_assets,
+            ids_to_replace,
+        )
+
+        

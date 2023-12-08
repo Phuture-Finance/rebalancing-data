@@ -74,3 +74,4 @@ def convert_from_sql_strings(string_list):
         converted_strings.append(i)
     return converted_strings
 
+
