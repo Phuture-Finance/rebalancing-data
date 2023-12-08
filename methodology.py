@@ -3,10 +3,12 @@ import numpy as np
 import requests
 import decouple
 import sys
+from web3 import Web3
 
 sys.path.append("../")
 import time
 from pycoingecko import CoinGeckoAPI
+from abis import index_anatomy
 
 key = decouple.config("CG_KEY")
 cg = CoinGeckoAPI(api_key=key)
@@ -40,6 +42,7 @@ class MethodologyBase:
         self.weights = None
         self.weights_converted = None
         self.slippage_data = None
+        self.results = None
         self.blockchains = {
             "ethereum": "ethereum",
             "avalanche": "avalanche-2",
@@ -61,7 +64,7 @@ class MethodologyBase:
             "avalanche": "https://avalanche.api.0x.org/swap/v1/quote",
             "arbitrum-nova": "https://arbitrum.api.0x.org/swap/v1/quote",
             "arbitrum-one": "https://arbitrum.api.0x.org/swap/v1/quote",
-            "base": "https://base.api.0x.org/",
+            "base": "https://base.api.0x.org/swap/v1/quote",
         }
         self.header = {"0x-api-key": decouple.config("ZEROEX_KEY")}
         self.stablecoin_by_blockchain_info = {
@@ -439,6 +442,7 @@ class MethodologyBase:
             for id, data in self.category_data.iterrows()
         ]
         results = results.sort_values("market_cap", ascending=False)
+        self.results = results
         return results
 
     def main(
@@ -470,6 +474,7 @@ class MethodologyBase:
 class MethodologyProd(MethodologyBase):
     def __init__(
         self,
+        version,
         index_homechain,
         index_address,
         min_mcap,
@@ -493,8 +498,13 @@ class MethodologyProd(MethodologyBase):
             max_slippage,
             cg_category,
         )
+        assert index_homechain in list(
+            self.blockchains.keys()
+        ), "Homechain not supported"
+        self.version = version
         self.index_address = index_address
         self.index_homechain = index_homechain
+        self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url()))
 
     def main(
         self,
@@ -511,5 +521,51 @@ class MethodologyProd(MethodologyBase):
             remove_category_assets,
             ids_to_replace,
         )
-
+        if self.version == 1: 
+            self.v1_index_diff_check()
         
+        return (self.results,self.slippage_data)
+        
+
+    def chain_to_provider_url(self):
+        mapping = {
+            "ethereum": decouple.config("ETHEREUM_INFURA_URL"),
+            "avalanche": decouple.config("AVALANCHE_INFURA_URL"),
+            "binance-smart-chain": decouple.config("BINANCE_INFURA_URL"),
+            "polygon-pos": decouple.config("POLYGON_INFURA_URL"),
+            "arbitrum-one": decouple.config("ARBITRUM_INFURA_URL"),
+            "arbitrum-nova": decouple.config("ARBITRUM_INFURA_URL"),
+            "optimistic-ethereum": decouple.Config("OPTIMISM_INFURA_URL"),
+            "base": decouple.config("BASE_INFURA_URL"),
+        }
+
+        return mapping[self.index_homechain]
+
+    def v1_index_diff_check(self):
+        anatomy_contract = self.w3.eth.contract(
+            address=self.index_address, abi=index_anatomy
+        )
+        addresses, weights = anatomy_contract.functions.anatomy().call()
+        for address in addresses:
+            address = address.lower()
+            if address not in list(self.results["address"]):
+                data = cg.get_coin_info_from_contract_address_by_id(
+                    self.index_homechain, address
+                )
+                self.results.loc[data["id"]] = [data["name"], 0, 0, 0, address, "None"]
+        return self.results
+
+    def output_for_contract(self):
+        zipped_assets = list(
+            zip(list(self.results["address"]), list(self.results["weight_converted"]))
+        )
+        sorted_assets = sorted(zipped_assets, key=lambda x: int(x[0], base=0))
+        asset_string = []
+        weight_string = []
+        for asset, weight in sorted_assets:
+            asset_string.append(asset)
+            weight_string.append(f"{weight}")
+        asset_string = ",".join(asset_string)
+        weight_string = ",".join(weight_string)
+        print(asset_string)
+        print(weight_string)
