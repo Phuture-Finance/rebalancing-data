@@ -9,6 +9,7 @@ sys.path.append("../")
 import time
 from pycoingecko import CoinGeckoAPI
 from abis import index_anatomy
+from db_funcs import convert_to_sql_strings, insert_values
 
 key = decouple.config("CG_KEY")
 cg = CoinGeckoAPI(api_key=key)
@@ -477,6 +478,7 @@ class MethodologyProd(MethodologyBase):
         version,
         index_homechain,
         index_address,
+        db_benchmark_table,
         min_mcap,
         min_weight,
         max_weight,
@@ -505,9 +507,11 @@ class MethodologyProd(MethodologyBase):
         self.index_address = index_address
         self.index_homechain = index_homechain
         self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url()))
+        self.db_benchmark_table = db_benchmark_table
 
     def main(
         self,
+        date,
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
@@ -521,11 +525,11 @@ class MethodologyProd(MethodologyBase):
             remove_category_assets,
             ids_to_replace,
         )
-        if self.version == 1: 
+        self.add_results_to_db(date)
+        if self.version == 1:
             self.v1_index_diff_check()
-        
-        return (self.results,self.slippage_data)
-        
+
+        return (self.results, self.slippage_data)
 
     def chain_to_provider_url(self):
         mapping = {
@@ -555,10 +559,18 @@ class MethodologyProd(MethodologyBase):
                 self.results.loc[data["id"]] = [data["name"], 0, 0, 0, address, "None"]
         return self.results
 
+    def add_results_to_db(self, date):
+        db_assets = convert_to_sql_strings(list(self.results.index))
+        db_weights = list(self.results["weight"])
+        insert_values(date, db_assets, db_weights, self.db_benchmark_table)
+
     def output_for_contract(self):
         if self.version == 1:
             zipped_assets = list(
-                zip(list(self.results["address"]), list(self.results["weight_converted"]))
+                zip(
+                    list(self.results["address"]),
+                    list(self.results["weight_converted"]),
+                )
             )
             sorted_assets = sorted(zipped_assets, key=lambda x: int(x[0], base=0))
             asset_string = []

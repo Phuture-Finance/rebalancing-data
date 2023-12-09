@@ -109,5 +109,3 @@ def convert_from_sql_strings(string_list):
                 i = i.replace(number,mapping[number])
         converted_strings.append(i)
     return converted_strings
-
-print(convert_from_sql_strings(convert_to_sql_strings(['1inch'])))
