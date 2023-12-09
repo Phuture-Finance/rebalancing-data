@@ -556,16 +556,17 @@ class MethodologyProd(MethodologyBase):
         return self.results
 
     def output_for_contract(self):
-        zipped_assets = list(
-            zip(list(self.results["address"]), list(self.results["weight_converted"]))
-        )
-        sorted_assets = sorted(zipped_assets, key=lambda x: int(x[0], base=0))
-        asset_string = []
-        weight_string = []
-        for asset, weight in sorted_assets:
-            asset_string.append(asset)
-            weight_string.append(f"{weight}")
-        asset_string = ",".join(asset_string)
-        weight_string = ",".join(weight_string)
-        print(asset_string)
-        print(weight_string)
+        if self.version == 1:
+            zipped_assets = list(
+                zip(list(self.results["address"]), list(self.results["weight_converted"]))
+            )
+            sorted_assets = sorted(zipped_assets, key=lambda x: int(x[0], base=0))
+            asset_string = []
+            weight_string = []
+            for asset, weight in sorted_assets:
+                asset_string.append(asset)
+                weight_string.append(f"{weight}")
+            asset_string = ",".join(asset_string)
+            weight_string = ",".join(weight_string)
+            print(asset_string)
+            print(weight_string)
