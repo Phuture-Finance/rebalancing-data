@@ -165,6 +165,7 @@ class MethodologyBase:
                 "max_supply",
             ]
         ]
+        coin_data["symbol"] = coin_data["symbol"].str.upper()
         self.category_data = pd.concat([self.category_data, coin_data])
         self.category_data.sort_values(by=["market_cap"], inplace=True, ascending=False)
         return self.category_data
