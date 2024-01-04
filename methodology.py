@@ -4,12 +4,19 @@ import requests
 import decouple
 import sys
 from web3 import Web3
+import datetime
 
 sys.path.append("../")
 import time
 from pycoingecko import CoinGeckoAPI
 from abis import index_anatomy
-from db_funcs import convert_to_sql_strings, insert_values
+from db_funcs import (
+    convert_to_sql_strings,
+    insert_values,
+    create_connection,
+    db,
+    convert_from_sql_strings,
+)
 
 key = decouple.config("CG_KEY")
 cg = CoinGeckoAPI(api_key=key)
@@ -139,6 +146,7 @@ class MethodologyBase:
                 "max_supply",
             ]
         ]
+        self.category_data["symbol"] = self.category_data["symbol"].str.upper()
         return self.category_data
 
     def add_assets_to_category(self, ids):
@@ -168,6 +176,12 @@ class MethodologyBase:
         for i in range(len(ids)):
             self.category_data.rename(index={ids[i]: replacement_ids[i]}, inplace=True)
         return self.category_data
+
+    def update_token_data(self, data):
+        for dictionary in data:
+            self.category_data.at[
+                dictionary["id"], dictionary["category"]
+            ] = dictionary["value"]
 
     def get_all_coin_data(self):
         self.all_coin_data = pd.DataFrame(cg.get_coins_list(include_platform=True))
@@ -364,7 +378,7 @@ class MethodologyBase:
         redstone_base_url = (
             "https://api.redstone.finance/prices?provider=redstone&symbols="
         )
-        symbols = list(self.category_data["symbol"].str.upper())
+        symbols = list(self.category_data["symbol"])
         for s in symbols:
             if s == symbols[-1]:
                 redstone_base_url += f"{s}"
@@ -384,11 +398,17 @@ class MethodologyBase:
         self.mcap_data = self.category_data["market_cap"]
         return self.mcap_data
 
-    def calculate_weights(self):
+    def calculate_weights(self,split_data= None):
         self.set_mcap_data()
         if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
-        self.weights = self.mcap_data.div(self.mcap_data.sum())
+        if split_data != None and split_data["asset_to_split"] in self.mcap_data.index and split_data["asset_to_receive"] in self.mcap_data.index:
+            temp_mcap_data = self.mcap_data
+            temp_mcap_data.drop(split_data["asset_to_receive"],inplace=True)
+            self.weights = temp_mcap_data.div(temp_mcap_data.sum())
+        else:
+            self.weights = self.mcap_data.div(self.mcap_data.sum())
+    
         while (self.weights > self.max_weight).any(axis=None):
             self.weights[self.weights > self.max_weight] = self.max_weight
             remainder = 1 - self.weights.sum()
@@ -401,6 +421,9 @@ class MethodologyBase:
         acceptable_weights = self.weights > self.min_weight
         self.weights = self.weights[acceptable_weights]
         self.weights = self.weights.div(self.weights.sum())
+        if split_data != None:
+            self.weights[split_data["asset_to_receive"]] = self.weights[split_data["asset_to_split"]] * split_data["split_ratio"]
+            self.weights[split_data["asset_to_split"]] = self.weights[split_data["asset_to_split"]] * (1- split_data["split_ratio"])
         self.weights.sort_values(inplace=True, ascending=False)
         self.category_data.query("index in @self.weights.index", inplace=True)
         self.set_mcap_data()
@@ -428,7 +451,7 @@ class MethodologyBase:
     def show_results(self):
         results = pd.DataFrame()
         results.index = self.category_data.index
-        results["name"] = self.category_data["name"]
+        results["symbol"] = self.category_data["symbol"]
         results["market_cap"] = self.category_data["market_cap"]
         results["weight"] = self.weights
         results["weight_converted"] = self.weights_converted
@@ -453,6 +476,8 @@ class MethodologyBase:
         add_category_assets=None,
         remove_category_assets=None,
         ids_to_replace=None,
+        values_to_update=None,
+        weight_split_data=None
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -461,13 +486,15 @@ class MethodologyBase:
             self.add_assets_to_category(add_category_assets)
         if ids_to_replace:
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
+        if values_to_update:
+            self.update_token_data(values_to_update)
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity()
         self.check_redstone_price_feeds()
-        self.calculate_weights()
+        self.calculate_weights(weight_split_data)
         self.converted_weights()
         return (self.show_results(), self.slippage_data)
 
@@ -475,10 +502,12 @@ class MethodologyBase:
 class MethodologyProd(MethodologyBase):
     def __init__(
         self,
+        date,
         version,
         index_homechain,
         index_address,
         db_benchmark_table,
+        db_liquidity_table,
         min_mcap,
         min_weight,
         max_weight,
@@ -503,32 +532,46 @@ class MethodologyProd(MethodologyBase):
         assert index_homechain in list(
             self.blockchains.keys()
         ), "Homechain not supported"
+        self.date = date
         self.version = version
         self.index_address = index_address
         self.index_homechain = index_homechain
         self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url()))
         self.db_benchmark_table = db_benchmark_table
+        self.db_liquidity_table = db_liquidity_table
+        self.avg_slippage_data = None
 
     def main(
         self,
-        date,
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
         remove_category_assets=None,
         ids_to_replace=None,
+        values_to_update=None,
+        weight_split_data=None
     ):
-        super().main(
-            single_chain,
-            df_to_remove,
-            add_category_assets,
-            remove_category_assets,
-            ids_to_replace,
-        )
-        self.add_results_to_db(date)
+        self.get_category_data()
+        if remove_category_assets:
+            self.remove_assets_from_category(remove_category_assets)
+        if add_category_assets:
+            self.add_assets_to_category(add_category_assets)
+        if ids_to_replace:
+            self.replace_ids(ids_to_replace[0], ids_to_replace[1])
+        if values_to_update:
+            self.update_token_data(values_to_update)
+        self.get_all_coin_data()
+        self.filter_and_merge_coin_data(single_chain, df_to_remove)
+        self.token_supply_check()
+        self.asset_maturity_check()
+        self.assess_liquidity()
+        self.check_redstone_price_feeds()
+        self.calculate_weights(weight_split_data)
+        self.converted_weights()
+        self.show_results()
+        self.add_results_to_benchmark_db()
         if self.version == 1:
             self.v1_index_diff_check()
-
         return (self.results, self.slippage_data)
 
     def chain_to_provider_url(self):
@@ -547,7 +590,7 @@ class MethodologyProd(MethodologyBase):
 
     def v1_index_diff_check(self):
         anatomy_contract = self.w3.eth.contract(
-            address=self.index_address, abi=index_anatomy
+            address=self.w3.to_checksum_address(self.index_address), abi=index_anatomy
         )
         addresses, weights = anatomy_contract.functions.anatomy().call()
         for address in addresses:
@@ -559,10 +602,18 @@ class MethodologyProd(MethodologyBase):
                 self.results.loc[data["id"]] = [data["name"], 0, 0, 0, address, "None"]
         return self.results
 
-    def add_results_to_db(self, date):
+    def add_results_to_benchmark_db(self):
         db_assets = convert_to_sql_strings(list(self.results.index))
         db_weights = list(self.results["weight"])
-        insert_values(date, db_assets, db_weights, self.db_benchmark_table)
+        insert_values(self.date, db_assets, db_weights, self.db_benchmark_table)
+
+    def add_slippage_to_liquidity_db(self):
+        slippages_to_save = self.slippage_data["slippage"].head(20)
+        asset_columns = convert_to_sql_strings(list(slippages_to_save.index))
+        slippage_values = list(slippages_to_save.values)
+        insert_values(
+            self.date, asset_columns, slippage_values, self.db_liquidity_table
+        )
 
     def output_for_contract(self):
         if self.version == 1:
@@ -582,3 +633,90 @@ class MethodologyProd(MethodologyBase):
             weight_string = ",".join(weight_string)
             print(asset_string)
             print(weight_string)
+
+    def assess_liquidity(self):
+        slippages = []
+        # Iterate over each row of the dataframe
+        for id, coin_data in self.category_data.iterrows():
+            slippage_dict = {"slippage": float("-inf")}
+            # If there are no platforms listed it is likely a native asset so we use symbol instead of address for the buy token
+            if len(coin_data["platforms"].keys()) == 0:
+                slippage_dict = self.calculate_slippage(
+                    coin_data["symbol"].upper(), self.get_blockchain_by_native_asset(id)
+                )
+                # If response is not None then we replace the current slippage dictionary with the return one
+                if slippage_dict is not None:
+                    slippage_dict["id"] = id
+                    slippages.append(slippage_dict)
+                else:
+                    continue
+            else:
+                # Iterate over each blockchain the asset is listed on
+                for blockchain in coin_data["platforms"].keys():
+                    # Check that the blockchain is supported
+                    if blockchain in self.blockchains.keys():
+                        temp_slippage_dict = self.calculate_slippage(
+                            coin_data["platforms"][blockchain], blockchain
+                        )
+                        # If response is not None and the return slippage is less negative than what is stored in slippage_dict then replace
+                        if (
+                            temp_slippage_dict is not None
+                            and temp_slippage_dict["slippage"]
+                            > slippage_dict["slippage"]
+                        ):
+                            temp_slippage_dict["id"] = id
+                            slippage_dict = temp_slippage_dict
+
+                        else:
+                            continue
+                    else:
+                        continue
+                # Check whether asset is native to a supported blockchain
+                blockchain = self.get_blockchain_by_native_asset(id)
+                if blockchain is not None:
+                    temp_slippage_dict = self.calculate_slippage(
+                        coin_data["symbol"], blockchain
+                    )
+                    # If return slippage is less negative than what is stored in slippage_dict then replace
+                    if (
+                        temp_slippage_dict is not None
+                        and temp_slippage_dict["slippage"] > slippage_dict["slippage"]
+                    ):
+                        temp_slippage_dict["id"] = id
+                        slippage_dict = temp_slippage_dict
+                # If length of slippage_dict is greater than 1 this means there is a valid response to store
+                if len(slippage_dict) > 1:
+                    slippages.append(slippage_dict)
+                # Else slippage_dict stores the default value and thus no valid response has been stored
+                else:
+                    continue
+        slippage_pd = (
+            pd.DataFrame(slippages)
+            .set_index("id")
+            .sort_values(by=["slippage"], ascending=False)
+        )
+        self.slippage_data = slippage_pd
+        self.add_slippage_to_liquidity_db()
+        self.avg_slippage_data = self.check_avg_slippage()
+        self.category_data = self.category_data.filter(
+            self.avg_slippage_data.index, axis=0
+        )
+
+        return (self.category_data, self.slippage_data)
+
+    def check_avg_slippage(self):
+        start_date = str(
+            datetime.date.fromisoformat(self.date)
+            - datetime.timedelta(days=self.liquidity_consistency)
+        )
+        avg_liq_df = pd.read_sql(
+            f"Select * from {self.db_liquidity_table} where date >= ? ",
+            create_connection(db),
+            index_col="date",
+            parse_dates=["date"],
+            params=[start_date],
+        )
+        avg_liq_df = avg_liq_df.ewm(span=3).mean().iloc[-1]
+        avg_liq_df = avg_liq_df[avg_liq_df > self.max_slippage]
+        avg_liq_df.index = convert_from_sql_strings(list(avg_liq_df.index))
+        return avg_liq_df
