@@ -57,22 +57,20 @@ class MethodologyBase:
             "binance-smart-chain": "binancecoin",
             "polygon-pos": "matic-network",
             "arbitrum-one": "ethereum",
-            "arbitrum-nova": "ethereum",
             "fantom": "fantom",
             "optimistic-ethereum": "ethereum",
             "base": "ethereum",
         }
         # URLs for 0x
         self.url_0x = {
-            "ethereum": "https://api.0x.org/swap/v1/quote",
-            "polygon-pos": "https://polygon.api.0x.org/swap/v1/quote",
-            "binance-smart-chain": "https://bsc.api.0x.org/swap/v1/quote",
-            "optimistic-ethereum": "https://optimism.api.0x.org/swap/v1/quote",
-            "fantom": "https://fantom.api.0x.org/swap/v1/quote",
-            "avalanche": "https://avalanche.api.0x.org/swap/v1/quote",
-            "arbitrum-nova": "https://arbitrum.api.0x.org/swap/v1/quote",
-            "arbitrum-one": "https://arbitrum.api.0x.org/swap/v1/quote",
-            "base": "https://base.api.0x.org/swap/v1/quote",
+            "ethereum": "https://api.0x.org/swap/v1/price",
+            "polygon-pos": "https://polygon.api.0x.org/swap/v1/price",
+            "binance-smart-chain": "https://bsc.api.0x.org/swap/v1/price",
+            "optimistic-ethereum": "https://optimism.api.0x.org/swap/v1/price",
+            "fantom": "https://fantom.api.0x.org/swap/v1/price",
+            "avalanche": "https://avalanche.api.0x.org/swap/v1/price",
+            "arbitrum-one": "https://arbitrum.api.0x.org/swap/v1/price",
+            "base": "https://base.api.0x.org/swap/v1/price",
         }
         self.header = {"0x-api-key": decouple.config("ZEROEX_KEY")}
         self.stablecoin_by_blockchain_info = {
@@ -86,10 +84,6 @@ class MethodologyBase:
             },
             "polygon-pos": {
                 "address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-                "decimals": 6,
-            },
-            "arbitrum-nova": {
-                "address": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
                 "decimals": 6,
             },
             "arbitrum-one": {
@@ -270,7 +264,6 @@ class MethodologyBase:
                 * 10**decimals,
                 "enableSlippageProtection": "true",
             }
-            time.sleep(0.2)
             # spot price is calculated as a price for 100$ swap
             resp = requests.get(
                 self.url_0x[blockchain], params=query, headers=self.header
@@ -282,7 +275,6 @@ class MethodologyBase:
                 int(1e5 / cg.get_price(sell_token_id, "usd")[sell_token_id]["usd"])
                 * 10**decimals
             )
-            time.sleep(0.2)
             resp = requests.get(
                 self.url_0x[blockchain], params=query, headers=self.header
             )
@@ -399,17 +391,21 @@ class MethodologyBase:
         self.mcap_data = self.category_data["market_cap"]
         return self.mcap_data
 
-    def calculate_weights(self,split_data= None):
+    def calculate_weights(self, split_data=None):
         self.set_mcap_data()
         if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
-        if split_data != None and split_data["asset_to_split"] in self.mcap_data.index and split_data["asset_to_receive"] in self.mcap_data.index:
+        if (
+            split_data != None
+            and split_data["asset_to_split"] in self.mcap_data.index
+            and split_data["asset_to_receive"] in self.mcap_data.index
+        ):
             temp_mcap_data = self.mcap_data
-            temp_mcap_data.drop(split_data["asset_to_receive"],inplace=True)
+            temp_mcap_data.drop(split_data["asset_to_receive"], inplace=True)
             self.weights = temp_mcap_data.div(temp_mcap_data.sum())
         else:
             self.weights = self.mcap_data.div(self.mcap_data.sum())
-    
+
         while (self.weights > self.max_weight).any(axis=None):
             self.weights[self.weights > self.max_weight] = self.max_weight
             remainder = 1 - self.weights.sum()
@@ -423,8 +419,12 @@ class MethodologyBase:
         self.weights = self.weights[acceptable_weights]
         self.weights = self.weights.div(self.weights.sum())
         if split_data != None:
-            self.weights[split_data["asset_to_receive"]] = self.weights[split_data["asset_to_split"]] * split_data["split_ratio"]
-            self.weights[split_data["asset_to_split"]] = self.weights[split_data["asset_to_split"]] * (1- split_data["split_ratio"])
+            self.weights[split_data["asset_to_receive"]] = (
+                self.weights[split_data["asset_to_split"]] * split_data["split_ratio"]
+            )
+            self.weights[split_data["asset_to_split"]] = self.weights[
+                split_data["asset_to_split"]
+            ] * (1 - split_data["split_ratio"])
         self.weights.sort_values(inplace=True, ascending=False)
         self.category_data.query("index in @self.weights.index", inplace=True)
         self.set_mcap_data()
@@ -459,7 +459,7 @@ class MethodologyBase:
         results["address"] = [
             data["platforms"][self.slippage_data.at[id, "blockchain"]]
             if self.slippage_data.at[id, "blockchain"] in data["platforms"].keys()
-            else data["symbol"].upper()
+            else "0x0000000000000000000000000000000000000000"
             for id, data in self.category_data.iterrows()
         ]
         results["blockchain_with_highest_liq"] = [
@@ -478,7 +478,7 @@ class MethodologyBase:
         remove_category_assets=None,
         ids_to_replace=None,
         values_to_update=None,
-        weight_split_data=None
+        weight_split_data=None,
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -487,10 +487,10 @@ class MethodologyBase:
             self.add_assets_to_category(add_category_assets)
         if ids_to_replace:
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
-        if values_to_update:
-            self.update_token_data(values_to_update)
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
+        if values_to_update:
+            self.update_token_data(values_to_update)
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity()
@@ -537,7 +537,7 @@ class MethodologyProd(MethodologyBase):
         self.version = version
         self.index_address = index_address
         self.index_homechain = index_homechain
-        self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url()))
+        self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url(index_homechain)))
         self.db_benchmark_table = db_benchmark_table
         self.db_liquidity_table = db_liquidity_table
         self.avg_slippage_data = None
@@ -550,7 +550,7 @@ class MethodologyProd(MethodologyBase):
         remove_category_assets=None,
         ids_to_replace=None,
         values_to_update=None,
-        weight_split_data=None
+        weight_split_data=None,
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -559,10 +559,10 @@ class MethodologyProd(MethodologyBase):
             self.add_assets_to_category(add_category_assets)
         if ids_to_replace:
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
-        if values_to_update:
-            self.update_token_data(values_to_update)
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
+        if values_to_update:
+            self.update_token_data(values_to_update)
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity()
@@ -575,19 +575,31 @@ class MethodologyProd(MethodologyBase):
             self.v1_index_diff_check()
         return (self.results, self.slippage_data)
 
-    def chain_to_provider_url(self):
+    def chain_to_provider_url(self, chain):
         mapping = {
             "ethereum": decouple.config("ETHEREUM_INFURA_URL"),
             "avalanche": decouple.config("AVALANCHE_INFURA_URL"),
             "binance-smart-chain": decouple.config("BINANCE_INFURA_URL"),
             "polygon-pos": decouple.config("POLYGON_INFURA_URL"),
             "arbitrum-one": decouple.config("ARBITRUM_INFURA_URL"),
-            "arbitrum-nova": decouple.config("ARBITRUM_INFURA_URL"),
             "optimistic-ethereum": decouple.Config("OPTIMISM_INFURA_URL"),
             "base": decouple.config("BASE_INFURA_URL"),
         }
 
-        return mapping[self.index_homechain]
+        return mapping[chain]
+
+    def chain_to_chain_id(self, chain):
+        mapping = {
+            "ethereum": 1,
+            "avalanche": 43114,
+            "binance-smart-chain": 56,
+            "polygon-pos": 137,
+            "arbitrum-one": 42161,
+            "optimistic-ethereum": 10,
+            "base": 8453,
+        }
+
+        return mapping[chain]
 
     def v1_index_diff_check(self):
         anatomy_contract = self.w3.eth.contract(
@@ -721,3 +733,28 @@ class MethodologyProd(MethodologyBase):
         avg_liq_df = avg_liq_df[avg_liq_df > self.max_slippage]
         avg_liq_df.index = convert_from_sql_strings(list(avg_liq_df.index))
         return avg_liq_df
+
+    def check_registered_assets(self, index):
+        query = f"""{{indexAssets(where:{{index:\"{self.index_address}\"}}){{
+        asset
+        chainID
+        }}}}"""
+        resp = requests.post(
+            "https://api.thegraph.com/subgraphs/name/olivermehr/subgraph-test",
+            json={"query": query},
+        )
+        resp = resp.json()["data"]["indexAssets"]
+        asset_dict = {}
+
+        for asset_info in resp:
+            asset = asset_info["asset"]
+            chain_id = asset_info["chainID"]
+            check = asset_dict.setdefault(chain_id, [])
+            asset_dict[chain_id].append(asset)
+
+        for id, data in self.results.iterrows():
+            chain_id = self.chain_to_chain_id(data["blockchain_with_highest_liq"])
+            if data["address"] not in asset_dict[chain_id]:
+                print(
+                    f"{id} needs to be registered on {data['blockchain_with_highest_liq']} with chain ID {chain_id} and address {data['address']}"
+                )
