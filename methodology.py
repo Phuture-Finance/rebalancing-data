@@ -198,16 +198,14 @@ class MethodologyBase:
                     }
                 if self.get_blockchain_by_native_asset(id) == single_chain:
                     to_remove = False
-                if to_remove == True:
-                    self.all_coin_data.drop(id, inplace=True)
             else:
                 for blockchain in list(data["platforms"].keys()):
                     if blockchain in self.blockchains.keys():
                         to_remove = False
                 if id in self.blockchains.values():
                     to_remove = False
-                if to_remove == True:
-                    self.all_coin_data.drop(id, inplace=True)
+            if to_remove == True:
+                self.all_coin_data.drop(id, inplace=True)
         self.category_data = self.category_data.join(
             self.all_coin_data["platforms"], how="inner", on="id"
         )
@@ -518,6 +516,7 @@ class MethodologyProd(MethodologyBase):
         liquidity_consistency,
         max_slippage,
         cg_category=None,
+        subgraph_url=None,
     ):
         super().__init__(
             min_mcap,
@@ -541,6 +540,7 @@ class MethodologyProd(MethodologyBase):
         self.db_benchmark_table = db_benchmark_table
         self.db_liquidity_table = db_liquidity_table
         self.avg_slippage_data = None
+        self.subgraph_url = subgraph_url
 
     def main(
         self,
@@ -740,7 +740,7 @@ class MethodologyProd(MethodologyBase):
         chainID
         }}}}"""
         resp = requests.post(
-            "https://api.thegraph.com/subgraphs/name/olivermehr/subgraph-test",
+            self.subgraph_url,
             json={"query": query},
         )
         resp = resp.json()["data"]["indexAssets"]
