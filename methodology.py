@@ -113,6 +113,7 @@ class MethodologyBase:
         assert self.index_homechain in list(
             self.blockchains.keys()
         ), "Homechain not supported"
+        assert type(self.cg_categories) == list, "Categories must be in a list"
 
     def get_category_data(self):
         if self.cg_categories is None:
@@ -374,14 +375,14 @@ class MethodologyBase:
         self.category_data = self.category_data.filter(
             acceptable_slippages.index, axis=0
         )
+        slippages["optimal chain"] = slippages.apply(
+            self.compute_chain_for_optimal_liquidity, axis=1
+        )
         slippages["best slippage"] = slippages.max(
             axis=1, skipna=True, numeric_only=True
         )
         slippages["best slippage chain"] = slippages.idxmax(
             axis=1, skipna=True, numeric_only=True
-        )
-        slippages["verify homechain slippage"] = slippages.apply(
-            self.verify_homechain_slippage, axis=1
         )
         slippages.sort_values(
             by="best slippage",
@@ -392,14 +393,20 @@ class MethodologyBase:
         self.slippage_data = slippages
         return (self.category_data, self.slippage_data)
 
-    def verify_homechain_slippage(self, series):
-        if (
-            self.index_homechain in series.index
-            and series[self.index_homechain] > self.max_slippage
-        ):
-            return True
+    def compute_chain_for_optimal_liquidity(self, series):
+        filtered_series = series[series > self.max_slippage]
+        print(filtered_series)
+        if len(filtered_series.index) == 0:
+            return "None"
+        elif len(filtered_series.index) == 1:
+            return filtered_series.index[0]
+        elif self.index_homechain in filtered_series.index:
+            return self.index_homechain
+        elif "ethereum" in filtered_series.index:
+            filtered_series.drop(labels=["ethereum"], inplace=True)
+            return filtered_series.idxmax()
         else:
-            return False
+            return filtered_series.idxmax()
 
     def check_redstone_price_feeds(self, onchain_oracles):
         redstone_base_url = (
@@ -501,20 +508,12 @@ class MethodologyBase:
         blockchain_list = []
 
         for id, data in self.category_data.iterrows():
-            if self.slippage_data.at[id, "verify homechain slippage"] == True:
-                blockchain_list.append(self.index_homechain)
-                if self.index_homechain in data["platforms"].keys():
-                    address_list.append(data["platforms"][self.index_homechain])
-                else:
-                    address_list.append("0x0000000000000000000000000000000000000000")
-
+            chain = self.slippage_data.at[id, "optimal chain"]
+            blockchain_list.append(chain)
+            if chain in data["platforms"].keys():
+                address_list.append(data["platforms"][chain])
             else:
-                best_slippage_chain = self.slippage_data.at[id, "best slippage chain"]
-                blockchain_list.append(best_slippage_chain)
-                if best_slippage_chain in data["platforms"].keys():
-                    address_list.append(data["platforms"][best_slippage_chain])
-                else:
-                    address_list.append("0x0000000000000000000000000000000000000000")
+                address_list.append("0x0000000000000000000000000000000000000000")
         results["address"] = address_list
         results["blockchain"] = blockchain_list
         self.results = results
@@ -603,6 +602,7 @@ class MethodologyProd(MethodologyBase):
         ids_to_replace=None,
         values_to_update=None,
         weight_split_data=None,
+        onchain_oracles=None,
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -618,7 +618,7 @@ class MethodologyProd(MethodologyBase):
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity()
-        self.check_redstone_price_feeds()
+        self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_split_data)
         self.converted_weights()
         self.show_results()
@@ -763,7 +763,11 @@ class MethodologyProd(MethodologyBase):
         slippages["verify homechain slippage"] = slippages.apply(
             self.verify_homechain_slippage, axis=1
         )
-        slippages.sort_values(by='best slippage',ascending=False,inplace=True,)
+        slippages.sort_values(
+            by="best slippage",
+            ascending=False,
+            inplace=True,
+        )
         self.slippage_data = slippages
         self.add_slippage_to_liquidity_db()
 
