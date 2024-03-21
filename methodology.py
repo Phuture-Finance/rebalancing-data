@@ -177,7 +177,11 @@ class MethodologyBase:
         return self.category_data
 
     def remove_assets_from_category(self, ids):
-        self.category_data.drop(ids, inplace=True, errors="ignore")
+        self.category_data.drop(
+            ids,
+            inplace=True,
+            errors="ignore",
+        )
 
     def replace_ids(self, ids, replacement_ids):
         for i in range(len(ids)):
@@ -254,11 +258,6 @@ class MethodologyBase:
                 df_mcaps["date"] = pd.to_datetime(df_mcaps["date"])
                 df_mcaps = df_mcaps.set_index("date", drop=True)
                 df_mcaps = df_mcaps.loc[~df_mcaps.index.duplicated(keep="first")]
-
-                if len(df_mcaps) < self.liveness_threshold:
-                    print(
-                        f"Note: {id}, marketcap data available only for {len(df_mcaps)} < {self.liveness_threshold} days"
-                    )
         return self.category_data
 
     def calculate_slippage(self, id, buy_token, blockchain):
@@ -271,16 +270,17 @@ class MethodologyBase:
                 "buyToken": buy_token,
                 "sellToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellAmount": int(
-                    1e5 / cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
-                )
-                * 10**stable_coin_decimals,
+                    1e5
+                    / cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
+                    * 10**stable_coin_decimals
+                ),
                 "enableSlippageProtection": "true",
             }
 
             sell_query = {
                 "buyToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellToken": buy_token,
-                "sellAmount": int(1e5 / cg.get_price(id, "usd")[id]["usd"]) * 10**18,
+                "sellAmount": int(1e5 / cg.get_price(id, "usd")[id]["usd"] * 10**18),
                 "enableSlippageProtection": "true",
             }
             buy_swap = requests.get(
@@ -290,7 +290,6 @@ class MethodologyBase:
             sell_swap = requests.get(
                 self.url_0x[blockchain], params=sell_query, headers=self.header
             ).json()
-
             if (
                 buy_swap["estimatedPriceImpact"] != None
                 and sell_swap["estimatedPriceImpact"] != None
@@ -300,12 +299,32 @@ class MethodologyBase:
                     -float(sell_swap["estimatedPriceImpact"]) / 100,
                 )
                 return [blockchain, slippage]
-
             else:
-                return None
+                # If estimated slippage field on API response is none we manually check the slippage by comparing the slippage on a large swap to a small one
+                print(f"Manually calculating slippage for {id} on {blockchain}")
+                buy_query["sellAmount"] = int(
+                    10
+                    / cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
+                    * 10**stable_coin_decimals
+                )
+                sell_query["sellAmount"] = int(
+                    10 / cg.get_price(id, "usd")[id]["usd"] * 10**18
+                )
+
+                small_buy_swap = requests.get(
+                    self.url_0x[blockchain], params=buy_query, headers=self.header
+                ).json()
+
+                small_sell_swap = requests.get(
+                    self.url_0x[blockchain], params=sell_query, headers=self.header
+                ).json()
+                slippage = min(
+                    float(buy_swap["price"]) / float(small_buy_swap["price"]) - 1,
+                    float(sell_swap["price"]) / float(small_sell_swap["price"]) - 1,
+                )
+                return [blockchain, slippage]
 
         except KeyError:
-            print(buy_token, blockchain)
             return None
 
     def get_blockchain_by_native_asset(self, coin_id):
@@ -326,11 +345,13 @@ class MethodologyBase:
                     coin_data["symbol"].upper(),
                     self.get_blockchain_by_native_asset(id),
                 )
-                # If response is not None then we replace the current slippage dictionary with the return one
                 if slippage_check is not None:
                     slippage_dict["id"] = [id]
                     slippage_dict[slippage_check[0]] = [slippage_check[1]]
                 else:
+                    print(
+                        f"{id} with no additional platforms returned an invalid API response"
+                    )
                     continue
             else:
                 # Iterate over each blockchain the asset is listed on
@@ -340,14 +361,17 @@ class MethodologyBase:
                         slippage_check = self.calculate_slippage(
                             id, coin_data["platforms"][blockchain], blockchain
                         )
-                        # If response is not None and the return slippage is less negative than what is stored in slippage_dict then replace
                         if slippage_check is not None:
                             slippage_dict["id"] = [id]
                             slippage_dict[slippage_check[0]] = [slippage_check[1]]
 
                         else:
+                            print(
+                                f"{id} on {blockchain} returned an invalid API response"
+                            )
                             continue
                     else:
+                        print(f"{blockchain} not supported")
                         continue
                 # Check whether asset is native to a supported blockchain
                 blockchain = self.get_blockchain_by_native_asset(id)
@@ -355,7 +379,6 @@ class MethodologyBase:
                     slippage_check = self.calculate_slippage(
                         id, coin_data["symbol"], blockchain
                     )
-                    # If return slippage is less negative than what is stored in slippage_dict then replace
                     if slippage_check is not None:
                         slippage_dict["id"] = [id]
                         slippage_dict[slippage_check[0]] = [slippage_check[1]]
@@ -364,8 +387,8 @@ class MethodologyBase:
                 temp_dataframe = pd.DataFrame(slippage_dict)
                 temp_dataframe.set_index("id", inplace=True)
                 slippages = pd.concat([slippages, temp_dataframe], axis=1)
-            # Else slippage_dict stores the default value and thus no valid response has been stored
             else:
+                print(f"{id} recorded no valid response across any platform")
                 continue
         slippages = slippages.T.groupby(level=0).sum().T
         slippages.replace(0, np.nan, inplace=True)
@@ -395,7 +418,6 @@ class MethodologyBase:
 
     def compute_chain_for_optimal_liquidity(self, series):
         filtered_series = series[series > self.max_slippage]
-        print(filtered_series)
         if len(filtered_series.index) == 0:
             return "None"
         elif len(filtered_series.index) == 1:
@@ -516,6 +538,7 @@ class MethodologyBase:
                 address_list.append("0x0000000000000000000000000000000000000000")
         results["address"] = address_list
         results["blockchain"] = blockchain_list
+        results.sort_values(by=["market_cap"], ascending=False, inplace=True)
         self.results = results
         return self.results
 
@@ -711,11 +734,13 @@ class MethodologyProd(MethodologyBase):
                     coin_data["symbol"].upper(),
                     self.get_blockchain_by_native_asset(id),
                 )
-                # If response is not None then we replace the current slippage dictionary with the return one
                 if slippage_check is not None:
                     slippage_dict["id"] = [id]
                     slippage_dict[slippage_check[0]] = [slippage_check[1]]
                 else:
+                    print(
+                        f"{id} with no additional platforms returned an invalid API response"
+                    )
                     continue
             else:
                 # Iterate over each blockchain the asset is listed on
@@ -725,14 +750,17 @@ class MethodologyProd(MethodologyBase):
                         slippage_check = self.calculate_slippage(
                             id, coin_data["platforms"][blockchain], blockchain
                         )
-                        # If response is not None and the return slippage is less negative than what is stored in slippage_dict then replace
                         if slippage_check is not None:
                             slippage_dict["id"] = [id]
                             slippage_dict[slippage_check[0]] = [slippage_check[1]]
 
                         else:
+                            print(
+                                f"{id} on {blockchain} returned an invalid API response"
+                            )
                             continue
                     else:
+                        print(f"{blockchain} not supported")
                         continue
                 # Check whether asset is native to a supported blockchain
                 blockchain = self.get_blockchain_by_native_asset(id)
@@ -740,7 +768,6 @@ class MethodologyProd(MethodologyBase):
                     slippage_check = self.calculate_slippage(
                         id, coin_data["symbol"], blockchain
                     )
-                    # If return slippage is less negative than what is stored in slippage_dict then replace
                     if slippage_check is not None:
                         slippage_dict["id"] = [id]
                         slippage_dict[slippage_check[0]] = [slippage_check[1]]
@@ -749,19 +776,25 @@ class MethodologyProd(MethodologyBase):
                 temp_dataframe = pd.DataFrame(slippage_dict)
                 temp_dataframe.set_index("id", inplace=True)
                 slippages = pd.concat([slippages, temp_dataframe], axis=1)
-            # Else slippage_dict stores the default value and thus no valid response has been stored
             else:
+                print(f"{id} recorded no valid response across any platform")
                 continue
         slippages = slippages.T.groupby(level=0).sum().T
         slippages.replace(0, np.nan, inplace=True)
+        acceptable_slippages = slippages[slippages >= self.max_slippage].dropna(
+            axis=0, how="all"
+        )
+        self.category_data = self.category_data.filter(
+            acceptable_slippages.index, axis=0
+        )
+        slippages["optimal chain"] = slippages.apply(
+            self.compute_chain_for_optimal_liquidity, axis=1
+        )
         slippages["best slippage"] = slippages.max(
             axis=1, skipna=True, numeric_only=True
         )
         slippages["best slippage chain"] = slippages.idxmax(
             axis=1, skipna=True, numeric_only=True
-        )
-        slippages["verify homechain slippage"] = slippages.apply(
-            self.verify_homechain_slippage, axis=1
         )
         slippages.sort_values(
             by="best slippage",

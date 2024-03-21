@@ -189,4 +189,8 @@ class BackTester:
             concat_data = pd.concat([concat_data, return_data], axis=1)
         concat_data = self.add_benchmarks_to_data(concat_data)
         fig = px.line(concat_data)
+        fig.update_xaxes(title_text="Date")
+        fig.update_yaxes(title_text="Return (%)")
+        fig.update_layout(title="Index Performance")
+
         return concat_data, fig
