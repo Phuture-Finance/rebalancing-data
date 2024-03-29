@@ -238,7 +238,7 @@ class MethodologyBase:
 
     def asset_maturity_check(self):
         for id, _ in self.category_data.iterrows():
-            cg_data = cg.get_coin_market_chart_by_id(id, vs_currency="USD", days="max")
+            cg_data = cg.get_coin_market_chart_by_id(id, vs_currency="usd", days="max")
             df_prices = pd.DataFrame(cg_data["prices"], columns=["date", id])
             df_prices = df_prices[df_prices[id] > 0]
             df_prices["date"] = pd.to_datetime(df_prices["date"], unit="ms").dt.date
