@@ -16,6 +16,9 @@ from db_funcs import (
     create_connection,
     db,
     convert_from_sql_strings,
+    create_benchmark_table,
+    create_liquidity_table
+
 )
 
 key = decouple.config("CG_KEY")
@@ -640,11 +643,13 @@ class MethodologyProd(MethodologyBase):
             self.update_token_data(values_to_update)
         self.token_supply_check()
         self.asset_maturity_check()
+        self.create_db_tables()
         self.assess_liquidity()
         self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_split_data)
         self.converted_weights()
         self.show_results()
+        
         self.add_results_to_benchmark_db()
         if self.version == 1:
             self.v1_index_diff_check()
@@ -810,6 +815,10 @@ class MethodologyProd(MethodologyBase):
         )
 
         return (self.category_data, self.slippage_data)
+    
+    def create_db_tables(self):
+        create_liquidity_table(self.db_liquidity_table)
+        create_benchmark_table(self.db_benchmark_table)
 
     def check_avg_slippage(self):
         start_date = str(

@@ -109,3 +109,16 @@ def convert_from_sql_strings(string_list):
                 i = i.replace(number,mapping[number])
         converted_strings.append(i)
     return converted_strings
+
+def create_liquidity_table(name):
+    sql_string = f"""CREATE TABLE IF NOT EXISTS {name} (
+	date text PRIMARY KEY
+);"""
+    create_table(sql_string)
+
+def create_benchmark_table(name):
+    sql_string = f"""CREATE TABLE IF NOT EXISTS {name} (
+	date text PRIMARY KEY
+);"""
+    create_table(sql_string)
+    
