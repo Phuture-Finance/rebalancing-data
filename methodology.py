@@ -17,8 +17,7 @@ from db_funcs import (
     db,
     convert_from_sql_strings,
     create_benchmark_table,
-    create_liquidity_table
-
+    create_liquidity_table,
 )
 
 key = decouple.config("CG_KEY")
@@ -230,6 +229,12 @@ class MethodologyBase:
         )
         return self.category_data
 
+    def add_platform_to_token(self, data):
+        for dictionary in data:
+            self.category_data.at[dictionary["id"], "platforms"][
+                dictionary["blockchain"]
+            ] = dictionary["address"]
+
     def token_supply_check(self):
         supply_check = (
             self.category_data["circulating_supply"]
@@ -336,7 +341,7 @@ class MethodologyBase:
                 return blockchain
         return None
 
-    def assess_liquidity(self):
+    def assess_liquidity(self, blockchains_to_remove=None):
         slippages = pd.DataFrame()
         # Iterate over each row of the dataframe
         for id, coin_data in self.category_data.iterrows():
@@ -395,6 +400,8 @@ class MethodologyBase:
                 continue
         slippages = slippages.T.groupby(level=0).sum().T
         slippages.replace(0, np.nan, inplace=True)
+        if blockchains_to_remove:
+            slippages.drop(columns=blockchains_to_remove,inplace=True,errors='ignore')
         acceptable_slippages = slippages[slippages >= self.max_slippage].dropna(
             axis=0, how="all"
         )
@@ -553,6 +560,8 @@ class MethodologyBase:
         remove_category_assets=None,
         ids_to_replace=None,
         values_to_update=None,
+        platforms_to_add=None,
+        platforms_to_remove=None,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -565,11 +574,13 @@ class MethodologyBase:
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
+        if platforms_to_add:
+            self.add_platform_to_token(platforms_to_add)        
         if values_to_update:
             self.update_token_data(values_to_update)
         self.token_supply_check()
         self.asset_maturity_check()
-        self.assess_liquidity()
+        self.assess_liquidity(platforms_to_remove)
         self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_split_data)
         self.converted_weights()
@@ -627,6 +638,8 @@ class MethodologyProd(MethodologyBase):
         remove_category_assets=None,
         ids_to_replace=None,
         values_to_update=None,
+        platforms_to_add=None,
+        platforms_to_remove=None,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -639,17 +652,19 @@ class MethodologyProd(MethodologyBase):
             self.replace_ids(ids_to_replace[0], ids_to_replace[1])
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
+        if platforms_to_add:
+            self.add_platform_to_token(platforms_to_add)
         if values_to_update:
             self.update_token_data(values_to_update)
         self.token_supply_check()
         self.asset_maturity_check()
         self.create_db_tables()
-        self.assess_liquidity()
+        self.assess_liquidity(platforms_to_remove)
         self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_split_data)
         self.converted_weights()
         self.show_results()
-        
+
         self.add_results_to_benchmark_db()
         if self.version == 1:
             self.v1_index_diff_check()
@@ -702,7 +717,9 @@ class MethodologyProd(MethodologyBase):
 
     def add_slippage_to_liquidity_db(self):
         slippages_to_save = self.slippage_data["best slippage"].head(20)
+        print(slippages_to_save)
         asset_columns = convert_to_sql_strings(list(slippages_to_save.index))
+        print(asset_columns)
         slippage_values = list(slippages_to_save.values)
         insert_values(
             self.date, asset_columns, slippage_values, self.db_liquidity_table
@@ -727,7 +744,7 @@ class MethodologyProd(MethodologyBase):
             print(asset_string)
             print(weight_string)
 
-    def assess_liquidity(self):
+    def assess_liquidity(self,blockchains_to_remove):
         slippages = pd.DataFrame()
         # Iterate over each row of the dataframe
         for id, coin_data in self.category_data.iterrows():
@@ -786,12 +803,9 @@ class MethodologyProd(MethodologyBase):
                 continue
         slippages = slippages.T.groupby(level=0).sum().T
         slippages.replace(0, np.nan, inplace=True)
-        acceptable_slippages = slippages[slippages >= self.max_slippage].dropna(
-            axis=0, how="all"
-        )
-        self.category_data = self.category_data.filter(
-            acceptable_slippages.index, axis=0
-        )
+        if blockchains_to_remove:
+            slippages.drop(columns=blockchains_to_remove,inplace=True,errors='ignore')
+            slippages.dropna(axis=0,how='all',inplace=True)
         slippages["optimal chain"] = slippages.apply(
             self.compute_chain_for_optimal_liquidity, axis=1
         )
@@ -815,7 +829,7 @@ class MethodologyProd(MethodologyBase):
         )
 
         return (self.category_data, self.slippage_data)
-    
+
     def create_db_tables(self):
         create_liquidity_table(self.db_liquidity_table)
         create_benchmark_table(self.db_benchmark_table)
