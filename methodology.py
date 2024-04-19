@@ -9,7 +9,7 @@ import datetime
 sys.path.append("../")
 import time
 from pycoingecko import CoinGeckoAPI
-from abis import index_anatomy
+from abis import index_anatomy,erc20_contract
 from db_funcs import (
     convert_to_sql_strings,
     insert_values,
@@ -36,10 +36,10 @@ class MethodologyBase:
         liveness_threshold,
         liquidity_consistency,
         max_slippage,
+        slippage_trade_size,
         cg_categories=None,
     ):
         self.index_homechain = index_homechain
-
         self.min_mcap = min_mcap
         self.min_weight = min_weight
         self.max_weight = max_weight
@@ -49,6 +49,7 @@ class MethodologyBase:
         self.max_slippage = max_slippage
         self.cg_categories = cg_categories
         self.max_int_for_weight = max_int_for_weight
+        self.slippage_trade_size = slippage_trade_size
         self.category_data = None
         self.all_coin_data = None
         self.mcap_data = None
@@ -112,10 +113,36 @@ class MethodologyBase:
                 "decimals": 6,
             },
         }
+        self.w3 = Web3(
+            Web3.HTTPProvider(self.chain_to_provider_url(self.index_homechain))
+        )
         assert self.index_homechain in list(
             self.blockchains.keys()
         ), "Homechain not supported"
         assert type(self.cg_categories) == list, "Categories must be in a list"
+    
+    def chain_to_provider_url(self, chain):
+        mapping = {
+            "ethereum": decouple.config("ETHEREUM_INFURA_URL"),
+            "avalanche": decouple.config("AVALANCHE_INFURA_URL"),
+            "binance-smart-chain": decouple.config("BINANCE_INFURA_URL"),
+            "polygon-pos": decouple.config("POLYGON_INFURA_URL"),
+            "arbitrum-one": decouple.config("ARBITRUM_INFURA_URL"),
+            "optimistic-ethereum": decouple.Config("OPTIMISM_INFURA_URL"),
+            "base": decouple.config("BASE_INFURA_URL"),
+        }
+
+        return mapping[chain]
+    
+    def get_decimals(self,blockchain,address):
+        try:
+            self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url(blockchain)))
+            token_contract = self.w3.eth.contract(address=self.w3.to_checksum_address(address),abi=erc20_contract)
+            decimals = token_contract.functions.decimals().call()
+            return decimals
+        except:
+            return 18
+
 
     def get_category_data(self):
         if self.cg_categories is None:
@@ -273,22 +300,22 @@ class MethodologyBase:
             "decimals"
         ]
         stable_coin_id = "usd-coin"
+        buy_token_decimals = self.get_decimals(blockchain,buy_token)
         try:
             buy_query = {
                 "buyToken": buy_token,
                 "sellToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellAmount": int(
-                    1e5
+                    self.slippage_trade_size
                     / cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
                     * 10**stable_coin_decimals
                 ),
                 "enableSlippageProtection": "true",
             }
-
             sell_query = {
                 "buyToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellToken": buy_token,
-                "sellAmount": int(1e5 / cg.get_price(id, "usd")[id]["usd"] * 10**18),
+                "sellAmount": int(self.slippage_trade_size / cg.get_price(id, "usd")[id]["usd"] * 10**buy_token_decimals),
                 "enableSlippageProtection": "true",
             }
             buy_swap = requests.get(
@@ -316,7 +343,7 @@ class MethodologyBase:
                     * 10**stable_coin_decimals
                 )
                 sell_query["sellAmount"] = int(
-                    10 / cg.get_price(id, "usd")[id]["usd"] * 10**18
+                    10 / cg.get_price(id, "usd")[id]["usd"] * 10**buy_token_decimals
                 )
 
                 small_buy_swap = requests.get(
@@ -599,6 +626,7 @@ class MethodologyProd(MethodologyBase):
         min_mcap,
         min_weight,
         max_weight,
+        slippage_trade_size,
         max_int_for_weight,
         circ_supply_threshold,
         liveness_threshold,
@@ -617,14 +645,12 @@ class MethodologyProd(MethodologyBase):
             liveness_threshold,
             liquidity_consistency,
             max_slippage,
+            slippage_trade_size,
             cg_category,
         )
         self.date = date
         self.version = version
         self.index_address = index_address
-        self.w3 = Web3(
-            Web3.HTTPProvider(self.chain_to_provider_url(self.index_homechain))
-        )
         self.db_benchmark_table = db_benchmark_table
         self.db_liquidity_table = db_liquidity_table
         self.avg_slippage_data = None
@@ -670,19 +696,6 @@ class MethodologyProd(MethodologyBase):
             self.v1_index_diff_check()
         return (self.results, self.slippage_data)
 
-    def chain_to_provider_url(self, chain):
-        mapping = {
-            "ethereum": decouple.config("ETHEREUM_INFURA_URL"),
-            "avalanche": decouple.config("AVALANCHE_INFURA_URL"),
-            "binance-smart-chain": decouple.config("BINANCE_INFURA_URL"),
-            "polygon-pos": decouple.config("POLYGON_INFURA_URL"),
-            "arbitrum-one": decouple.config("ARBITRUM_INFURA_URL"),
-            "optimistic-ethereum": decouple.Config("OPTIMISM_INFURA_URL"),
-            "base": decouple.config("BASE_INFURA_URL"),
-        }
-
-        return mapping[chain]
-
     def chain_to_chain_id(self, chain):
         mapping = {
             "ethereum": 1,
@@ -717,9 +730,7 @@ class MethodologyProd(MethodologyBase):
 
     def add_slippage_to_liquidity_db(self):
         slippages_to_save = self.slippage_data["best slippage"].head(20)
-        print(slippages_to_save)
         asset_columns = convert_to_sql_strings(list(slippages_to_save.index))
-        print(asset_columns)
         slippage_values = list(slippages_to_save.values)
         insert_values(
             self.date, asset_columns, slippage_values, self.db_liquidity_table
