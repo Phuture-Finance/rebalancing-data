@@ -552,7 +552,7 @@ class MethodologyBase:
         self.weights_converted.sort_values(inplace=True, ascending=False)
         assert (
             self.weights_converted.sum() == self.max_int_for_weight
-        ), "Sum of converted weights does equal max int value"
+        ), "Sum of converted weights does not equal max int value"
         return self.weights_converted
 
     def show_results(self):
