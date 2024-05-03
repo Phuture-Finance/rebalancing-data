@@ -9,7 +9,7 @@ import datetime
 sys.path.append("../")
 import time
 from pycoingecko import CoinGeckoAPI
-from abis import index_anatomy,erc20_contract
+from abis import index_anatomy, erc20_contract
 from db_funcs import (
     convert_to_sql_strings,
     insert_values,
@@ -120,7 +120,8 @@ class MethodologyBase:
             self.blockchains.keys()
         ), "Homechain not supported"
         assert type(self.cg_categories) == list, "Categories must be in a list"
-    
+        assert self.max_slippage < 0, "Slippage must be negative"
+
     def chain_to_provider_url(self, chain):
         mapping = {
             "ethereum": decouple.config("ETHEREUM_INFURA_URL"),
@@ -133,19 +134,20 @@ class MethodologyBase:
         }
 
         return mapping[chain]
-    
-    def get_decimals(self,blockchain,address):
+
+    def get_decimals(self, blockchain, address):
         try:
             self.w3 = Web3(Web3.HTTPProvider(self.chain_to_provider_url(blockchain)))
-            token_contract = self.w3.eth.contract(address=self.w3.to_checksum_address(address),abi=erc20_contract)
+            token_contract = self.w3.eth.contract(
+                address=self.w3.to_checksum_address(address), abi=erc20_contract
+            )
             decimals = token_contract.functions.decimals().call()
             return decimals
         except:
             return 18
 
-
     def get_category_data(self):
-        if self.cg_categories is None:
+        if len(self.cg_categories) == 0:
             self.category_data = pd.DataFrame(
                 cg.get_coins_markets("usd", order="market_cap_desc", per_page=250)
             )
@@ -300,7 +302,7 @@ class MethodologyBase:
             "decimals"
         ]
         stable_coin_id = "usd-coin"
-        buy_token_decimals = self.get_decimals(blockchain,buy_token)
+        buy_token_decimals = self.get_decimals(blockchain, buy_token)
         try:
             buy_query = {
                 "buyToken": buy_token,
@@ -315,7 +317,11 @@ class MethodologyBase:
             sell_query = {
                 "buyToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellToken": buy_token,
-                "sellAmount": int(self.slippage_trade_size / cg.get_price(id, "usd")[id]["usd"] * 10**buy_token_decimals),
+                "sellAmount": int(
+                    self.slippage_trade_size
+                    / cg.get_price(id, "usd")[id]["usd"]
+                    * 10**buy_token_decimals
+                ),
                 "enableSlippageProtection": "true",
             }
             buy_swap = requests.get(
@@ -359,7 +365,7 @@ class MethodologyBase:
                 )
                 return [blockchain, slippage]
 
-        except KeyError:
+        except:
             return None
 
     def get_blockchain_by_native_asset(self, coin_id):
@@ -428,7 +434,7 @@ class MethodologyBase:
         slippages = slippages.T.groupby(level=0).sum().T
         slippages.replace(0, np.nan, inplace=True)
         if blockchains_to_remove:
-            slippages.drop(columns=blockchains_to_remove,inplace=True,errors='ignore')
+            slippages.drop(columns=blockchains_to_remove, inplace=True, errors="ignore")
         acceptable_slippages = slippages[slippages >= self.max_slippage].dropna(
             axis=0, how="all"
         )
@@ -602,7 +608,7 @@ class MethodologyBase:
         self.get_all_coin_data()
         self.filter_and_merge_coin_data(single_chain, df_to_remove)
         if platforms_to_add:
-            self.add_platform_to_token(platforms_to_add)        
+            self.add_platform_to_token(platforms_to_add)
         if values_to_update:
             self.update_token_data(values_to_update)
         self.token_supply_check()
@@ -755,7 +761,7 @@ class MethodologyProd(MethodologyBase):
             print(asset_string)
             print(weight_string)
 
-    def assess_liquidity(self,blockchains_to_remove):
+    def assess_liquidity(self, blockchains_to_remove):
         slippages = pd.DataFrame()
         # Iterate over each row of the dataframe
         for id, coin_data in self.category_data.iterrows():
@@ -815,8 +821,8 @@ class MethodologyProd(MethodologyBase):
         slippages = slippages.T.groupby(level=0).sum().T
         slippages.replace(0, np.nan, inplace=True)
         if blockchains_to_remove:
-            slippages.drop(columns=blockchains_to_remove,inplace=True,errors='ignore')
-            slippages.dropna(axis=0,how='all',inplace=True)
+            slippages.drop(columns=blockchains_to_remove, inplace=True, errors="ignore")
+            slippages.dropna(axis=0, how="all", inplace=True)
         slippages["optimal chain"] = slippages.apply(
             self.compute_chain_for_optimal_liquidity, axis=1
         )
