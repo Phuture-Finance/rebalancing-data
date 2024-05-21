@@ -447,6 +447,9 @@ class MethodologyBase:
         slippages["best slippage"] = slippages.max(
             axis=1, skipna=True, numeric_only=True
         )
+        slippages["optimal slippage"] = slippages.apply(
+            self.show_optimal_slippage, axis=1
+        )
         slippages["best slippage chain"] = slippages.idxmax(
             axis=1, skipna=True, numeric_only=True
         )
@@ -472,6 +475,12 @@ class MethodologyBase:
             return filtered_series.idxmax()
         else:
             return filtered_series.idxmax()
+
+    def show_optimal_slippage(self, series):
+        if series["optimal chain"] == "None":
+            return series["best slippage"]
+        else:
+            return series[series["optimal chain"]]
 
     def check_redstone_price_feeds(self, onchain_oracles):
         redstone_base_url = (
@@ -499,6 +508,13 @@ class MethodologyBase:
     def set_mcap_data(self):
         self.mcap_data = self.category_data["market_cap"]
         return self.mcap_data
+
+    def liquidity_score(self):
+        self.slippage_data["liquidity score"] = (
+            self.slippage_data["optimal slippage"] - self.slippage_data["optimal slippage"].min()
+        ) / (self.slippage_data["optimal slippage"].max() - self.slippage_data["optimal slippage"].min()) * (
+            100 - 1
+        ) + 1
 
     def calculate_weights(self, split_data=None):
         self.set_mcap_data()
@@ -595,6 +611,7 @@ class MethodologyBase:
         values_to_update=None,
         platforms_to_add=None,
         platforms_to_remove=None,
+        enable_liquidity_score = False,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -614,6 +631,8 @@ class MethodologyBase:
         self.token_supply_check()
         self.asset_maturity_check()
         self.assess_liquidity(platforms_to_remove)
+        if enable_liquidity_score == True:
+            self.liquidity_score()
         self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_split_data)
         self.converted_weights()
