@@ -52,7 +52,6 @@ class MethodologyBase:
         self.slippage_trade_size = slippage_trade_size
         self.category_data = None
         self.all_coin_data = None
-        self.mcap_data = None
         self.weights = None
         self.weights_converted = None
         self.slippage_data = None
@@ -505,9 +504,14 @@ class MethodologyBase:
                     self.category_data.drop(id, inplace=True)
         return self.category_data
 
-    def set_mcap_data(self):
-        self.mcap_data = self.category_data["market_cap"]
-        return self.mcap_data
+    def get_weight_data(self,weight_by):
+        data = self.category_data[weight_by]
+        if "liquidity score" in self.slippage_data.columns:
+            data = data * self.slippage_data["liquidity score"]
+            data.dropna(inplace=True)
+        print(data)
+        return data
+
 
     def liquidity_score(self):
         self.slippage_data["liquidity score"] = (
@@ -516,20 +520,20 @@ class MethodologyBase:
             100 - 1
         ) + 1
 
-    def calculate_weights(self, split_data=None):
-        self.set_mcap_data()
+    def calculate_weights(self,weight_by, split_data=None):
+        weight_data = self.get_weight_data(weight_by)
         if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
         if (
             split_data != None
-            and split_data["asset_to_split"] in self.mcap_data.index
-            and split_data["asset_to_receive"] in self.mcap_data.index
+            and split_data["asset_to_split"] in weight_data.index
+            and split_data["asset_to_receive"] in weight_data.index
         ):
-            temp_mcap_data = self.mcap_data
+            temp_mcap_data = weight_data
             temp_mcap_data.drop(split_data["asset_to_receive"], inplace=True)
             self.weights = temp_mcap_data.div(temp_mcap_data.sum())
         else:
-            self.weights = self.mcap_data.div(self.mcap_data.sum())
+            self.weights = weight_data.div(weight_data.sum())
 
         while (self.weights > self.max_weight).any(axis=None):
             self.weights[self.weights > self.max_weight] = self.max_weight
@@ -555,7 +559,6 @@ class MethodologyBase:
             ] * (1 - split_data["split_ratio"])
         self.weights.sort_values(inplace=True, ascending=False)
         self.category_data.query("index in @self.weights.index", inplace=True)
-        self.set_mcap_data()
         return self.weights
 
     def converted_weights(self):
@@ -603,6 +606,7 @@ class MethodologyBase:
 
     def main(
         self,
+        weight_by="market_cap",
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
@@ -634,7 +638,7 @@ class MethodologyBase:
         if enable_liquidity_score == True:
             self.liquidity_score()
         self.check_redstone_price_feeds(onchain_oracles)
-        self.calculate_weights(weight_split_data)
+        self.calculate_weights(weight_by, weight_split_data)
         self.converted_weights()
         return (self.show_results(), self.slippage_data)
 
