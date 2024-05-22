@@ -504,23 +504,57 @@ class MethodologyBase:
                     self.category_data.drop(id, inplace=True)
         return self.category_data
 
-    def get_weight_data(self,weight_by):
-        data = self.category_data[weight_by]
+    def get_yield_data(self,column_name):
+        yield_mapping = {
+            "wrapped-steth": {"url":"https://yields.llama.fi/chart/747c1d2a-c668-4682-b9f9-296708a3dd90","path":["data",-1,"apy"],"format":"%"},
+            "benqi-liquid-staked-avax":{"url":"https://api.benqi.fi/liquidstaking/apr","path":["apr"],"format":"d"},
+            "staked-frax-ether": {"url":"https://yields.llama.fi/chart/77020688-e1f9-443c-9388-e51ace15cc32","path":["data",-1,"apy"],"format":"%"},
+            "kelp-dao-restaked-eth": {"url":"https://yields.llama.fi/chart/33c732f6-a78d-41da-af5b-ccd9fa5e52d5","path":["data",-1,"apy"],"format":"%"},
+            "rocket-pool-eth": {"url":"https://yields.llama.fi/chart/d4b3c522-6127-4b89-bedf-83641cdcd2eb","path":["data",-1,"apy"],"format":"%"},
+            "coinbase-wrapped-staked-eth": {"url":"https://yields.llama.fi/chart/0f45d730-b279-4629-8e11-ccb5cc3038b4","path":["data",-1,"apy"],"format":"%"},
+            "mantle-staked-ether": {"url":"https://yields.llama.fi/chart/b9f2f00a-ba96-4589-a171-dde979a23d87","path":["data",-1,"apy"],"format":"%"},
+            "stakewise-v3-oseth": {"url":"https://yields.llama.fi/chart/4d01599c-69ae-41a3-bae1-5fab896f04c8","path":["data",-1,"apy"],"format":"%"},
+            "ankreth": {"url":"https://yields.llama.fi/chart/e201dbed-63fa-48e2-bfa2-f56e730167d2","path":["data",-1,"apy"],"format":"%"},
+            "restaked-swell-eth": {"url":"https://yields.llama.fi/chart/ca2acc2d-6246-44aa-ae91-8725b2c62c7c","path":["data",-1,"apy"],"format":"%"},
+
+        }
+        yields = []
+        for asset in self.category_data.index:
+            if asset in yield_mapping.keys():
+                response = requests.get(yield_mapping[asset]["url"]).json()
+                for i in yield_mapping[asset]["path"]:
+                    response = response[i]
+                response = float(response)
+                if yield_mapping[asset]["format"] == "%":
+                    response = response/100
+                yields.append(response)
+            else:
+                inputted_yield = input(f"Enter the current yield for {asset} in decimal form")
+                inputted_yield = float(inputted_yield)
+                yields.append(inputted_yield)
+        self.category_data[column_name] = yields
+
+    def get_weight_data(self, weight_by):
+        if weight_by[1] != None:
+            weight_by[1](weight_by[0])
+        data = self.category_data[weight_by[0]]
         if "liquidity score" in self.slippage_data.columns:
             data = data * self.slippage_data["liquidity score"]
             data.dropna(inplace=True)
-        print(data)
         return data
-
 
     def liquidity_score(self):
         self.slippage_data["liquidity score"] = (
-            self.slippage_data["optimal slippage"] - self.slippage_data["optimal slippage"].min()
-        ) / (self.slippage_data["optimal slippage"].max() - self.slippage_data["optimal slippage"].min()) * (
+            self.slippage_data["optimal slippage"]
+            - self.slippage_data["optimal slippage"].min()
+        ) / (
+            self.slippage_data["optimal slippage"].max()
+            - self.slippage_data["optimal slippage"].min()
+        ) * (
             100 - 1
         ) + 1
 
-    def calculate_weights(self,weight_by, split_data=None):
+    def calculate_weights(self, weight_by, split_data=None):
         weight_data = self.get_weight_data(weight_by)
         if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
@@ -600,13 +634,13 @@ class MethodologyBase:
                 address_list.append("0x0000000000000000000000000000000000000000")
         results["address"] = address_list
         results["blockchain"] = blockchain_list
-        results.sort_values(by=["market_cap"], ascending=False, inplace=True)
+        results.sort_values(by=["weight"], ascending=False, inplace=True)
         self.results = results
         return self.results
 
     def main(
         self,
-        weight_by="market_cap",
+        weight_by=["market_cap",None],
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
@@ -615,7 +649,7 @@ class MethodologyBase:
         values_to_update=None,
         platforms_to_add=None,
         platforms_to_remove=None,
-        enable_liquidity_score = False,
+        enable_liquidity_score=False,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -687,6 +721,7 @@ class MethodologyProd(MethodologyBase):
 
     def main(
         self,
+        weight_by="market_cap",
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
@@ -695,6 +730,7 @@ class MethodologyProd(MethodologyBase):
         values_to_update=None,
         platforms_to_add=None,
         platforms_to_remove=None,
+        enable_liquidity_score=False,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -715,8 +751,10 @@ class MethodologyProd(MethodologyBase):
         self.asset_maturity_check()
         self.create_db_tables()
         self.assess_liquidity(platforms_to_remove)
+        if enable_liquidity_score == True:
+            self.liquidity_score()
         self.check_redstone_price_feeds(onchain_oracles)
-        self.calculate_weights(weight_split_data)
+        self.calculate_weights(weight_by, weight_split_data)
         self.converted_weights()
         self.show_results()
 
@@ -851,6 +889,10 @@ class MethodologyProd(MethodologyBase):
         )
         slippages["best slippage"] = slippages.max(
             axis=1, skipna=True, numeric_only=True
+        )
+
+        slippages["optimal slippage"] = slippages.apply(
+            self.show_optimal_slippage, axis=1
         )
         slippages["best slippage chain"] = slippages.idxmax(
             axis=1, skipna=True, numeric_only=True
