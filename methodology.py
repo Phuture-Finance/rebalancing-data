@@ -516,7 +516,6 @@ class MethodologyBase:
             "stakewise-v3-oseth": {"url":"https://yields.llama.fi/chart/4d01599c-69ae-41a3-bae1-5fab896f04c8","path":["data",-1,"apy"],"format":"%"},
             "ankreth": {"url":"https://yields.llama.fi/chart/e201dbed-63fa-48e2-bfa2-f56e730167d2","path":["data",-1,"apy"],"format":"%"},
             "restaked-swell-eth": {"url":"https://yields.llama.fi/chart/ca2acc2d-6246-44aa-ae91-8725b2c62c7c","path":["data",-1,"apy"],"format":"%"},
-
         }
         yields = []
         for asset in self.category_data.index:
@@ -529,7 +528,7 @@ class MethodologyBase:
                     response = response/100
                 yields.append(response)
             else:
-                inputted_yield = input(f"Enter the current yield for {asset} in decimal form")
+                inputted_yield = input(f"Enter the current yield for {asset} in decimal form").strip()
                 inputted_yield = float(inputted_yield)
                 yields.append(inputted_yield)
         self.category_data[column_name] = yields
