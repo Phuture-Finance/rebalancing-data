@@ -720,7 +720,7 @@ class MethodologyProd(MethodologyBase):
 
     def main(
         self,
-        weight_by="market_cap",
+        weight_by=["market_cap",None],
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
