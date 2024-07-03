@@ -296,32 +296,30 @@ class MethodologyBase:
                 df_mcaps = df_mcaps.loc[~df_mcaps.index.duplicated(keep="first")]
         return self.category_data
 
-    def calculate_slippage(self, id, buy_token, blockchain):
+    def calculate_slippage(self, id, token_address, blockchain):
         stable_coin_decimals = self.stablecoin_by_blockchain_info[blockchain][
             "decimals"
         ]
         stable_coin_id = "usd-coin"
-        buy_token_decimals = self.get_decimals(blockchain, buy_token)
+        stable_coin_price = cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
+        token_price = cg.get_price(id, "usd")[id]["usd"]
+        token_decimals = self.get_decimals(blockchain, token_address)
         try:
             buy_query = {
-                "buyToken": buy_token,
+                "buyToken": token_address,
                 "sellToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellAmount": int(
                     self.slippage_trade_size
-                    / cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
+                    / stable_coin_price
                     * 10**stable_coin_decimals
-                ),
-                "enableSlippageProtection": "true",
+                )
             }
             sell_query = {
                 "buyToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
-                "sellToken": buy_token,
+                "sellToken": token_address,
                 "sellAmount": int(
-                    self.slippage_trade_size
-                    / cg.get_price(id, "usd")[id]["usd"]
-                    * 10**buy_token_decimals
+                    self.slippage_trade_size / token_price * 10**token_decimals
                 ),
-                "enableSlippageProtection": "true",
             }
             buy_swap = requests.get(
                 self.url_0x[blockchain], params=buy_query, headers=self.header
@@ -333,6 +331,10 @@ class MethodologyBase:
             if (
                 buy_swap["estimatedPriceImpact"] != None
                 and sell_swap["estimatedPriceImpact"] != None
+                and self.check_estimated_price_impact_field(buy_swap, token_price)
+                and self.check_estimated_price_impact_field(
+                    sell_swap, stable_coin_price
+                )
             ):
                 slippage = min(
                     -float(buy_swap["estimatedPriceImpact"]) / 100,
@@ -343,13 +345,9 @@ class MethodologyBase:
                 # If estimated slippage field on API response is none we manually check the slippage by comparing the slippage on a large swap to a small one
                 print(f"Manually calculating slippage for {id} on {blockchain}")
                 buy_query["sellAmount"] = int(
-                    10
-                    / cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
-                    * 10**stable_coin_decimals
+                    10 / stable_coin_price * 10**stable_coin_decimals
                 )
-                sell_query["sellAmount"] = int(
-                    10 / cg.get_price(id, "usd")[id]["usd"] * 10**buy_token_decimals
-                )
+                sell_query["sellAmount"] = int(10 / token_price * 10**token_decimals)
 
                 small_buy_swap = requests.get(
                     self.url_0x[blockchain], params=buy_query, headers=self.header
@@ -366,6 +364,18 @@ class MethodologyBase:
 
         except:
             return None
+
+    def check_estimated_price_impact_field(self, api_response, token_price):
+        true_price_impact = (
+            int(api_response["buyAmount"]) * token_price
+        ) / self.slippage_trade_size - 1
+        if (
+            -float(api_response["estimatedPriceImpact"]) / 100
+            < true_price_impact - 0.01
+        ):
+            return False
+        else:
+            return True
 
     def get_blockchain_by_native_asset(self, coin_id):
         for blockchain, native_asset in self.blockchains.items():
@@ -504,18 +514,58 @@ class MethodologyBase:
                     self.category_data.drop(id, inplace=True)
         return self.category_data
 
-    def get_yield_data(self,column_name):
+    def get_yield_data(self, column_name):
         yield_mapping = {
-            "wrapped-steth": {"url":"https://yields.llama.fi/chart/747c1d2a-c668-4682-b9f9-296708a3dd90","path":["data",-1,"apy"],"format":"%"},
-            "benqi-liquid-staked-avax":{"url":"https://api.benqi.fi/liquidstaking/apr","path":["apr"],"format":"d"},
-            "staked-frax-ether": {"url":"https://yields.llama.fi/chart/77020688-e1f9-443c-9388-e51ace15cc32","path":["data",-1,"apy"],"format":"%"},
-            "kelp-dao-restaked-eth": {"url":"https://yields.llama.fi/chart/33c732f6-a78d-41da-af5b-ccd9fa5e52d5","path":["data",-1,"apy"],"format":"%"},
-            "rocket-pool-eth": {"url":"https://yields.llama.fi/chart/d4b3c522-6127-4b89-bedf-83641cdcd2eb","path":["data",-1,"apy"],"format":"%"},
-            "coinbase-wrapped-staked-eth": {"url":"https://yields.llama.fi/chart/0f45d730-b279-4629-8e11-ccb5cc3038b4","path":["data",-1,"apy"],"format":"%"},
-            "mantle-staked-ether": {"url":"https://yields.llama.fi/chart/b9f2f00a-ba96-4589-a171-dde979a23d87","path":["data",-1,"apy"],"format":"%"},
-            "stakewise-v3-oseth": {"url":"https://yields.llama.fi/chart/4d01599c-69ae-41a3-bae1-5fab896f04c8","path":["data",-1,"apy"],"format":"%"},
-            "ankreth": {"url":"https://yields.llama.fi/chart/e201dbed-63fa-48e2-bfa2-f56e730167d2","path":["data",-1,"apy"],"format":"%"},
-            "restaked-swell-eth": {"url":"https://yields.llama.fi/chart/ca2acc2d-6246-44aa-ae91-8725b2c62c7c","path":["data",-1,"apy"],"format":"%"},
+            "wrapped-steth": {
+                "url": "https://yields.llama.fi/chart/747c1d2a-c668-4682-b9f9-296708a3dd90",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "benqi-liquid-staked-avax": {
+                "url": "https://api.benqi.fi/liquidstaking/apr",
+                "path": ["apr"],
+                "format": "d",
+            },
+            "staked-frax-ether": {
+                "url": "https://yields.llama.fi/chart/77020688-e1f9-443c-9388-e51ace15cc32",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "kelp-dao-restaked-eth": {
+                "url": "https://yields.llama.fi/chart/33c732f6-a78d-41da-af5b-ccd9fa5e52d5",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "rocket-pool-eth": {
+                "url": "https://yields.llama.fi/chart/d4b3c522-6127-4b89-bedf-83641cdcd2eb",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "coinbase-wrapped-staked-eth": {
+                "url": "https://yields.llama.fi/chart/0f45d730-b279-4629-8e11-ccb5cc3038b4",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "mantle-staked-ether": {
+                "url": "https://yields.llama.fi/chart/b9f2f00a-ba96-4589-a171-dde979a23d87",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "stakewise-v3-oseth": {
+                "url": "https://yields.llama.fi/chart/4d01599c-69ae-41a3-bae1-5fab896f04c8",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "ankreth": {
+                "url": "https://yields.llama.fi/chart/e201dbed-63fa-48e2-bfa2-f56e730167d2",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
+            "restaked-swell-eth": {
+                "url": "https://yields.llama.fi/chart/ca2acc2d-6246-44aa-ae91-8725b2c62c7c",
+                "path": ["data", -1, "apy"],
+                "format": "%",
+            },
         }
         yields = []
         for asset in self.category_data.index:
@@ -525,10 +575,12 @@ class MethodologyBase:
                     response = response[i]
                 response = float(response)
                 if yield_mapping[asset]["format"] == "%":
-                    response = response/100
+                    response = response / 100
                 yields.append(response)
             else:
-                inputted_yield = input(f"Enter the current yield for {asset} in decimal form").strip()
+                inputted_yield = input(
+                    f"Enter the current yield for {asset} in decimal form"
+                ).strip()
                 inputted_yield = float(inputted_yield)
                 yields.append(inputted_yield)
         self.category_data[column_name] = yields
@@ -639,7 +691,7 @@ class MethodologyBase:
 
     def main(
         self,
-        weight_by=["market_cap",None],
+        weight_by=["market_cap", None],
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
@@ -720,7 +772,7 @@ class MethodologyProd(MethodologyBase):
 
     def main(
         self,
-        weight_by=["market_cap",None],
+        weight_by=["market_cap", None],
         single_chain=None,
         df_to_remove=None,
         add_category_assets=None,
