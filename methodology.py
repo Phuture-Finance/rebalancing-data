@@ -301,10 +301,11 @@ class MethodologyBase:
             "decimals"
         ]
         stable_coin_id = "usd-coin"
-        stable_coin_price = cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
-        token_price = cg.get_price(id, "usd")[id]["usd"]
-        token_decimals = self.get_decimals(blockchain, token_address)
         try:
+            stable_coin_price = cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
+            token_price = cg.get_price(id, "usd")[id]["usd"]
+            token_decimals = self.get_decimals(blockchain, token_address)
+        
             buy_query = {
                 "buyToken": token_address,
                 "sellToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
@@ -872,6 +873,23 @@ class MethodologyProd(MethodologyBase):
             weight_string = ",".join(weight_string)
             print(asset_string)
             print(weight_string)
+        elif self.version == 2:
+            composition_dict = {}
+            zipped_assets = list(
+                zip(
+                    list(self.results["blockchain"]),
+                    list(self.results["address"]),
+                    list(self.results["weight_converted"]),
+                )
+            )
+            for blockchain,address, weight in zipped_assets:
+                if composition_dict.get(self.chain_to_chain_id(blockchain),None) == None:
+                    composition_dict[self.chain_to_chain_id(blockchain)] = {address:weight}
+                else:
+                    composition_dict[self.chain_to_chain_id(blockchain)][address]=weight
+            print(composition_dict)
+
+
 
     def assess_liquidity(self, blockchains_to_remove):
         slippages = pd.DataFrame()
