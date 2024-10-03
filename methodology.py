@@ -66,18 +66,11 @@ class MethodologyBase:
             "optimistic-ethereum": "ethereum",
             "base": "ethereum",
         }
+
         # URLs for 0x
-        self.url_0x = {
-            "ethereum": "https://api.0x.org/swap/v1/price",
-            "polygon-pos": "https://polygon.api.0x.org/swap/v1/price",
-            "binance-smart-chain": "https://bsc.api.0x.org/swap/v1/price",
-            "optimistic-ethereum": "https://optimism.api.0x.org/swap/v1/price",
-            "fantom": "https://fantom.api.0x.org/swap/v1/price",
-            "avalanche": "https://avalanche.api.0x.org/swap/v1/price",
-            "arbitrum-one": "https://arbitrum.api.0x.org/swap/v1/price",
-            "base": "https://base.api.0x.org/swap/v1/price",
-        }
-        self.header = {"0x-api-key": decouple.config("ZEROEX_KEY")}
+        self.url_0x = "http://api.0x.org/swap/permit2/price"
+
+        self.header = {"0x-api-key": decouple.config("ZEROEX_KEY"), "0x-version": "v2"}
         self.stablecoin_by_blockchain_info = {
             "ethereum": {
                 "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
@@ -120,6 +113,19 @@ class MethodologyBase:
         ), "Homechain not supported"
         assert type(self.cg_categories) == list, "Categories must be in a list"
         assert self.max_slippage < 0, "Slippage must be negative"
+
+    def chain_to_chain_id(self, chain):
+        mapping = {
+            "ethereum": 1,
+            "avalanche": 43114,
+            "binance-smart-chain": 56,
+            "polygon-pos": 137,
+            "arbitrum-one": 42161,
+            "optimistic-ethereum": 10,
+            "base": 8453,
+        }
+
+        return mapping[chain]
 
     def chain_to_provider_url(self, chain):
         mapping = {
@@ -302,20 +308,25 @@ class MethodologyBase:
         ]
         stable_coin_id = "usd-coin"
         try:
-            stable_coin_price = cg.get_price(stable_coin_id, "usd")[stable_coin_id]["usd"]
+
+            stable_coin_price = cg.get_price(stable_coin_id, "usd")[stable_coin_id][
+                "usd"
+            ]
             token_price = cg.get_price(id, "usd")[id]["usd"]
             token_decimals = self.get_decimals(blockchain, token_address)
-        
+
             buy_query = {
+                "chainId": self.chain_to_chain_id(blockchain),
                 "buyToken": token_address,
                 "sellToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellAmount": int(
                     self.slippage_trade_size
                     / stable_coin_price
                     * 10**stable_coin_decimals
-                )
+                ),
             }
             sell_query = {
+                "chainId": self.chain_to_chain_id(blockchain),
                 "buyToken": self.stablecoin_by_blockchain_info[blockchain]["address"],
                 "sellToken": token_address,
                 "sellAmount": int(
@@ -323,46 +334,45 @@ class MethodologyBase:
                 ),
             }
             buy_swap = requests.get(
-                self.url_0x[blockchain], params=buy_query, headers=self.header
+                self.url_0x, params=buy_query, headers=self.header
             ).json()
 
             sell_swap = requests.get(
-                self.url_0x[blockchain], params=sell_query, headers=self.header
+                self.url_0x, params=sell_query, headers=self.header
             ).json()
-            if (
-                buy_swap["estimatedPriceImpact"] != None
-                and sell_swap["estimatedPriceImpact"] != None
-                and self.check_estimated_price_impact_field(buy_swap, token_price)
-                and self.check_estimated_price_impact_field(
-                    sell_swap, stable_coin_price
-                )
-            ):
-                slippage = min(
-                    -float(buy_swap["estimatedPriceImpact"]) / 100,
-                    -float(sell_swap["estimatedPriceImpact"]) / 100,
-                )
-                return [blockchain, slippage]
-            else:
-                # If estimated slippage field on API response is none we manually check the slippage by comparing the slippage on a large swap to a small one
-                print(f"Manually calculating slippage for {id} on {blockchain}")
-                buy_query["sellAmount"] = int(
-                    10 / stable_coin_price * 10**stable_coin_decimals
-                )
-                sell_query["sellAmount"] = int(10 / token_price * 10**token_decimals)
 
-                small_buy_swap = requests.get(
-                    self.url_0x[blockchain], params=buy_query, headers=self.header
-                ).json()
+            buy_query["sellAmount"] = int(
+                10 / stable_coin_price * 10**stable_coin_decimals
+            )
+            sell_query["sellAmount"] = int(10 / token_price * 10**token_decimals)
 
-                small_sell_swap = requests.get(
-                    self.url_0x[blockchain], params=sell_query, headers=self.header
-                ).json()
-                slippage = min(
-                    float(buy_swap["price"]) / float(small_buy_swap["price"]) - 1,
-                    float(sell_swap["price"]) / float(small_sell_swap["price"]) - 1,
-                )
-                return [blockchain, slippage]
+            small_buy_swap = requests.get(
+                self.url_0x, params=buy_query, headers=self.header
+            ).json()
 
+            small_sell_swap = requests.get(
+                self.url_0x, params=sell_query, headers=self.header
+            ).json()
+
+            buy_price = (
+                float(buy_swap["buyAmount"]) / token_decimals * token_price
+            ) / (self.slippage_trade_size)
+            small_buy_price = (
+                float(small_buy_swap["buyAmount"]) / token_decimals * token_price
+            ) / (10)
+            sell_price = (
+                float(sell_swap["buyAmount"]) / stable_coin_decimals * stable_coin_price
+            ) / (self.slippage_trade_size)
+            small_sell_price = (
+                float(small_sell_swap["buyAmount"])
+                / stable_coin_decimals
+                * stable_coin_price
+            ) / (10)
+            slippage = min(
+                buy_price / small_buy_price - 1, sell_price / small_sell_price - 1
+            )
+
+            return [blockchain, slippage]
         except:
             return None
 
@@ -815,19 +825,6 @@ class MethodologyProd(MethodologyBase):
             self.v1_index_diff_check()
         return (self.results, self.slippage_data)
 
-    def chain_to_chain_id(self, chain):
-        mapping = {
-            "ethereum": 1,
-            "avalanche": 43114,
-            "binance-smart-chain": 56,
-            "polygon-pos": 137,
-            "arbitrum-one": 42161,
-            "optimistic-ethereum": 10,
-            "base": 8453,
-        }
-
-        return mapping[chain]
-
     def v1_index_diff_check(self):
         anatomy_contract = self.w3.eth.contract(
             address=self.w3.to_checksum_address(self.index_address), abi=index_anatomy
@@ -882,14 +879,19 @@ class MethodologyProd(MethodologyBase):
                     list(self.results["weight_converted"]),
                 )
             )
-            for blockchain,address, weight in zipped_assets:
-                if composition_dict.get(self.chain_to_chain_id(blockchain),None) == None:
-                    composition_dict[self.chain_to_chain_id(blockchain)] = {address:weight}
+            for blockchain, address, weight in zipped_assets:
+                if (
+                    composition_dict.get(self.chain_to_chain_id(blockchain), None)
+                    == None
+                ):
+                    composition_dict[self.chain_to_chain_id(blockchain)] = {
+                        address: weight
+                    }
                 else:
-                    composition_dict[self.chain_to_chain_id(blockchain)][address]=weight
+                    composition_dict[self.chain_to_chain_id(blockchain)][
+                        address
+                    ] = weight
             print(composition_dict)
-
-
 
     def assess_liquidity(self, blockchains_to_remove):
         slippages = pd.DataFrame()
