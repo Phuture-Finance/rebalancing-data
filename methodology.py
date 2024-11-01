@@ -616,7 +616,7 @@ class MethodologyBase:
             100 - 1
         ) + 1
 
-    def calculate_weights(self, weight_by, split_data=None):
+    def calculate_weights(self, weight_by, individual_asset_weights, split_data):
         weight_data = self.get_weight_data(weight_by)
         if self.max_weight < (1 / len(self.category_data)):
             self.max_weight = 1 / len(self.category_data)
@@ -631,12 +631,45 @@ class MethodologyBase:
         else:
             self.weights = weight_data.div(weight_data.sum())
 
-        while (self.weights > self.max_weight).any(axis=None):
+        while (self.weights > self.max_weight).any(axis=None) or (
+            self.weights[list(individual_asset_weights.keys())]
+            > list(individual_asset_weights.values())
+        ).any():
             self.weights[self.weights > self.max_weight] = self.max_weight
+            self.weights[
+                (
+                    self.weights[list(individual_asset_weights.keys())]
+                    > list(individual_asset_weights.values())
+                ).index[
+                    (
+                        self.weights[list(individual_asset_weights.keys())]
+                        > list(individual_asset_weights.values())
+                    )
+                    == True
+                ]
+            ] = [
+                individual_asset_weights[asset]
+                for asset in (
+                    self.weights[list(individual_asset_weights.keys())]
+                    > list(individual_asset_weights.values())
+                ).index[
+                    (
+                        self.weights[list(individual_asset_weights.keys())]
+                        > list(individual_asset_weights.values())
+                    )
+                    == True
+                ]
+            ]
             remainder = 1 - self.weights.sum()
             if remainder == float(0):
                 break
             smaller_weights = self.weights[self.weights < self.max_weight]
+            for i in smaller_weights.index:
+                if (
+                    i in individual_asset_weights.keys()
+                    and smaller_weights[i] >= individual_asset_weights[i]
+                ):
+                    smaller_weights.drop(labels=i, inplace=True)
             self.weights = self.weights.add(
                 smaller_weights.div(smaller_weights.sum()).mul(remainder), fill_value=0
             )
@@ -712,6 +745,7 @@ class MethodologyBase:
         platforms_to_add=None,
         platforms_to_remove=None,
         enable_liquidity_score=False,
+        individual_asset_weight=None,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -734,7 +768,7 @@ class MethodologyBase:
         if enable_liquidity_score == True:
             self.liquidity_score()
         self.check_redstone_price_feeds(onchain_oracles)
-        self.calculate_weights(weight_by, weight_split_data)
+        self.calculate_weights(weight_by, individual_asset_weight, weight_split_data)
         self.converted_weights()
         return (self.show_results(), self.slippage_data)
 
@@ -793,6 +827,7 @@ class MethodologyProd(MethodologyBase):
         platforms_to_add=None,
         platforms_to_remove=None,
         enable_liquidity_score=False,
+        individual_asset_weight=None,
         weight_split_data=None,
         onchain_oracles=None,
     ):
@@ -816,7 +851,7 @@ class MethodologyProd(MethodologyBase):
         if enable_liquidity_score == True:
             self.liquidity_score()
         self.check_redstone_price_feeds(onchain_oracles)
-        self.calculate_weights(weight_by, weight_split_data)
+        self.calculate_weights(weight_by, individual_asset_weight, weight_split_data)
         self.converted_weights()
         self.show_results()
 
