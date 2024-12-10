@@ -771,6 +771,7 @@ class MethodologyBase:
         self.calculate_weights(weight_by, individual_asset_weight, weight_split_data)
         self.converted_weights()
         return (self.show_results(), self.slippage_data)
+    
 
 
 class MethodologyProd(MethodologyBase):
