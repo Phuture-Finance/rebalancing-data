@@ -732,6 +732,15 @@ class MethodologyBase:
         results.sort_values(by=["weight"], ascending=False, inplace=True)
         self.results = results
         return self.results
+    
+    def liquidity_checker(self, assets_ids):
+        self.add_assets_to_category(assets_ids)
+        self.get_all_coin_data()
+        self.filter_and_merge_coin_data()
+        self.assess_liquidity()
+        return self.slippage_data
+
+
 
     def main(
         self,
@@ -868,6 +877,7 @@ class MethodologyProd(MethodologyBase):
         addresses, weights = anatomy_contract.functions.anatomy().call()
         for address in addresses:
             address = address.lower()
+            
             if address not in list(self.results["address"]):
                 data = cg.get_coin_info_from_contract_address_by_id(
                     self.index_homechain, address
