@@ -755,8 +755,7 @@ class MethodologyBase:
         platforms_to_remove=None,
         enable_liquidity_score=False,
         individual_asset_weight=None,
-        weight_split_data=None,
-        onchain_oracles=None,
+        weight_split_data=None
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -776,7 +775,6 @@ class MethodologyBase:
         self.assess_liquidity(platforms_to_remove)
         if enable_liquidity_score == True:
             self.liquidity_score()
-        self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_by, individual_asset_weight, weight_split_data)
         self.converted_weights()
         return (self.show_results(), self.slippage_data)
@@ -838,8 +836,7 @@ class MethodologyProd(MethodologyBase):
         platforms_to_remove=None,
         enable_liquidity_score=False,
         individual_asset_weight=None,
-        weight_split_data=None,
-        onchain_oracles=None,
+        weight_split_data=None
     ):
         self.get_category_data()
         if remove_category_assets:
@@ -860,7 +857,6 @@ class MethodologyProd(MethodologyBase):
         self.assess_liquidity(platforms_to_remove)
         if enable_liquidity_score == True:
             self.liquidity_score()
-        self.check_redstone_price_feeds(onchain_oracles)
         self.calculate_weights(weight_by, individual_asset_weight, weight_split_data)
         self.converted_weights()
         self.show_results()
