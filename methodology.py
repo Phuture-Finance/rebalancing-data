@@ -134,7 +134,7 @@ class MethodologyBase:
             "binance-smart-chain": decouple.config("BINANCE_INFURA_URL"),
             "polygon-pos": decouple.config("POLYGON_INFURA_URL"),
             "arbitrum-one": decouple.config("ARBITRUM_INFURA_URL"),
-            "optimistic-ethereum": decouple.Config("OPTIMISM_INFURA_URL"),
+            "optimistic-ethereum": decouple.config("OPTIMISM_INFURA_URL"),
             "base": decouple.config("BASE_INFURA_URL"),
         }
 
