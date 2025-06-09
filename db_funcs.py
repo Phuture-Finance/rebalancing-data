@@ -59,6 +59,7 @@ def insert_values(row, columns, values, table_name):
     statement = f"""
     REPLACE INTO {table_name}(date,{columns})
     VALUES("{row}",{values})"""
+    print(statement)
     conn.execute(statement)
 
 
