@@ -9,8 +9,6 @@ stores historical rebalancing calculations.
 - **Index folders** (`AEX/`, `BEX/`, `CAI/`, etc.) – each folder contains a
   `methodology_template.ipynb` or dated notebooks that detail the rules and the
   monthly rebalancing for a specific index.
-- **Zetachain/** – example notebook for a Layer‑1 index.
-- **COOKIE/liquidity_checker.ipynb** – helper notebook to examine exchange liquidity.
 - **methodology.py** – core library providing `MethodologyBase` and `MethodologyProd`
   classes for gathering market data, applying eligibility rules and computing
   asset weights.
@@ -19,10 +17,9 @@ stores historical rebalancing calculations.
 - **db_funcs.py** – SQLite helper functions used to persist benchmarking and
   liquidity data.
 - **abis.py** – contract ABIs used for on‑chain interactions.
-- `Pipfile` / `Pipfile.lock` – Python dependencies (requires Python 3.6+).
+- `Pipfile` / `Pipfile.lock` – Python dependencies (requires Python 3.13+).
 
-A sample SQLite database (`rebalancing_data_db.sqlite`) is provided for local
-experiments.
+Data is stored in (`rebalancing_data_db.sqlite`) 
 
 ## Installation
 
