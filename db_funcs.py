@@ -20,32 +20,48 @@ def create_connection(db_file):
 def create_table(statement):
     conn = create_connection(db)
     try:
-        connection = conn.cursor()
-        connection.execute(statement)
+        cursor = conn.cursor()
+        cursor.execute(statement)
         print("Table created successfully")
     except Exception as e:
         print(e)
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        if conn:
+            conn.close()
 
 
 def add_column(column, table_name):
-    conn = create_connection(db).cursor()
+    conn = create_connection(db)
+    cursor = conn.cursor()
     statement = f"ALTER TABLE {table_name} ADD {column} DOUBLE PRECISION"
-    conn.execute(statement)
+    cursor.execute(statement)
+    cursor.close()
+    conn.close()
 
 
 def drop_column(column, table_name):
-    conn = create_connection(db).cursor()
+    conn = create_connection(db)
+    cursor = conn.cursor()
     statement = f"ALTER TABLE {table_name} DROP COLUMN {column} "
-    conn.execute(statement)
+    cursor.execute(statement)
+    cursor.close()
+    conn.close()
 
 
 def does_column_exist(column, table_name):
-    conn = create_connection(db).cursor()
-    statement = f"SELECT length({column}) FROM {table_name}"
-    try:
-        conn.execute(statement)
+    conn = create_connection(db)
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = [info[1] for info in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    if column in existing_columns:
         return True
-    except:
+    else:
         add_column(column, table_name)
         return True
 
@@ -53,14 +69,15 @@ def does_column_exist(column, table_name):
 def insert_values(row, columns, values, table_name):
     for column in columns:
         does_column_exist(column, table_name)
-    conn = create_connection(db).cursor()
-    columns = ",".join(columns)
-    values = str(values).strip("[]").replace(" ", "")
-    statement = f"""
-    REPLACE INTO {table_name}(date,{columns})
-    VALUES("{row}",{values})"""
-    print(statement)
-    conn.execute(statement)
+    conn = create_connection(db)
+    cursor = conn.cursor()
+    columns_str = ",".join(columns)
+    placeholders = ",".join(["?"] * (len(values) + 1))
+    sql = f"REPLACE INTO {table_name}(date,{columns_str}) VALUES ({placeholders})"
+    params = [row] + values
+    cursor.execute(sql, params)
+    cursor.close()
+    conn.close()
 
 
 # Helper functions
